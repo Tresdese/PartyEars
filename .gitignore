@@ -47,3 +47,61 @@ htmlcov/
 *.tmp
 *.temp
 
+# Dart y Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub/
+.pub-cache/
+.packages
+
+# Compilaciones y archivos temporales
+build/
+coverage/
+**/doc/api/
+*.log
+
+# Android
+android/local.properties
+android/.gradle/
+android/.cxx/
+android/key.properties
+android/app/debug/
+android/app/profile/
+android/app/release/
+
+# Certificados y claves privadas
+*.jks
+*.keystore
+*.pem
+
+# Windows
+windows/flutter/ephemeral/
+
+# Linux
+linux/flutter/ephemeral/
+
+# Archivos generados por plugins
+**/generated_plugin_registrant.dart
+
+# Entornos de desarrollo
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Archivos privados de configuración
+.env
+.env.*
+!.env.example
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Archivos temporales del editor
+*.swp
+*.tmp
+*.bak
+
