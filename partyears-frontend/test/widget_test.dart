@@ -17,8 +17,9 @@ Future<void> _login(WidgetTester tester) async {
 
 void main() {
   group('Pruebas de PartyEars', () {
-    testWidgets('Muestra la pantalla de inicio de sesión',
-        (WidgetTester tester) async {
+    testWidgets('Muestra la pantalla de inicio de sesión', (
+      WidgetTester tester,
+    ) async {
       _useDesktopSize(tester);
       await tester.pumpWidget(const PartyEarsApp());
 
@@ -29,8 +30,22 @@ void main() {
       expect(find.text('Crear una cuenta'), findsOneWidget);
     });
 
-    testWidgets('Sin party no se muestra código de sala',
-        (WidgetTester tester) async {
+    testWidgets('El inicio de sesión no se desborda en ventanas pequeñas', (
+      WidgetTester tester,
+    ) async {
+      addTearDown(tester.view.reset);
+      tester.view.devicePixelRatio = 1.0;
+      for (final size in const [Size(800, 600), Size(720, 400)]) {
+        tester.view.physicalSize = size;
+        await tester.pumpWidget(const PartyEarsApp());
+        await tester.pump();
+        expect(tester.takeException(), isNull, reason: '$size');
+      }
+    });
+
+    testWidgets('Sin party no se muestra código de sala', (
+      WidgetTester tester,
+    ) async {
       _useDesktopSize(tester);
       await _login(tester);
 
@@ -40,8 +55,9 @@ void main() {
       expect(find.text('Sala activa'.toUpperCase()), findsNothing);
     });
 
-    testWidgets('Crear party muestra el código y salir lo quita',
-        (WidgetTester tester) async {
+    testWidgets('Crear party muestra el código y salir lo quita', (
+      WidgetTester tester,
+    ) async {
       _useDesktopSize(tester);
       await _login(tester);
 
@@ -56,8 +72,9 @@ void main() {
       expect(find.text(demoPartyCode), findsNothing);
     });
 
-    testWidgets('Rechaza códigos con formato inválido',
-        (WidgetTester tester) async {
+    testWidgets('Rechaza códigos con formato inválido', (
+      WidgetTester tester,
+    ) async {
       _useDesktopSize(tester);
       await _login(tester);
 
@@ -66,12 +83,15 @@ void main() {
       await tester.enterText(find.byType(TextField).last, 'AB-12');
       await tester.tap(find.text('Unirse a una Party (demo)'));
       await tester.pump();
-      expect(find.text('Ingresa un código válido de seis caracteres'),
-          findsOneWidget);
+      expect(
+        find.text('Ingresa un código válido de seis caracteres'),
+        findsOneWidget,
+      );
     });
 
-    testWidgets('En teléfono usa navegación inferior sin desbordarse',
-        (WidgetTester tester) async {
+    testWidgets('En teléfono usa navegación inferior sin desbordarse', (
+      WidgetTester tester,
+    ) async {
       tester.view.physicalSize = const Size(390, 844);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -83,8 +103,24 @@ void main() {
       expect(find.text('Catálogo musical'), findsOneWidget);
     });
 
-    testWidgets('Filtra el catálogo por género',
-        (WidgetTester tester) async {
+    testWidgets('Sin party se puede agregar a la cola individual', (
+      WidgetTester tester,
+    ) async {
+      _useDesktopSize(tester);
+      await _login(tester);
+
+      await tester.tap(find.text('Música'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.add).first);
+      await tester.pump();
+      expect(
+        find.textContaining('a la cola requiere el backend'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Únete a una party'), findsNothing);
+    });
+
+    testWidgets('Filtra el catálogo por género', (WidgetTester tester) async {
       _useDesktopSize(tester);
       await _login(tester);
 

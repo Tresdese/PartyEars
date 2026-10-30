@@ -70,53 +70,56 @@ class _BrandPanel extends StatelessWidget {
               children: [
                 const AppLogo(),
                 Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.06),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: const Text(
-                          'MÚSICA · AMIGOS · VOZ',
-                          style: TextStyle(
-                            color: Color(0xFFD8CCFF),
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.06),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'MÚSICA · AMIGOS · VOZ',
+                            style: TextStyle(
+                              color: Color(0xFFD8CCFF),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 20),
-                      const Text(
-                        'Escucha la música.',
-                        style: _headlineStyle,
-                      ),
-                      Text(
-                        'Vive el momento.',
-                        style: _headlineStyle.copyWith(
-                          color: AppColors.primaryLight,
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 380),
-                        child: const Text(
-                          'Tu espacio para escuchar canciones, crear salas y '
-                          'conectar por voz con quienes más disfrutas.',
-                          style: TextStyle(
-                            color: Color(0xFFC4C0D8),
-                            fontSize: 15,
-                            height: 1.5,
+                        const SizedBox(height: 20),
+                        const Text('Escucha la música.', style: _headlineStyle),
+                        Text(
+                          'Vive el momento.',
+                          style: _headlineStyle.copyWith(
+                            color: AppColors.primaryLight,
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 40),
-                      const WaveBars(),
-                    ],
+                        const SizedBox(height: 20),
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 380),
+                          child: const Text(
+                            'Tu espacio para escuchar canciones, crear salas y '
+                            'conectar por voz con quienes más disfrutas.',
+                            style: TextStyle(
+                              color: Color(0xFFC4C0D8),
+                              fontSize: 15,
+                              height: 1.5,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 40),
+                        const WaveBars(),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -168,13 +171,16 @@ class _LoginForm extends StatelessWidget {
         const SizedBox(height: 12),
         Row(
           children: [
-            const Text('Contraseña', style: labelStyle),
-            const Spacer(),
+            const Expanded(child: Text('Contraseña', style: labelStyle)),
             TextButton(
               onPressed: () => _showPending(
-                  context, 'Recuperar contraseña requiere el backend'),
-              child: const Text('¿La olvidaste?',
-                  style: TextStyle(fontSize: 12)),
+                context,
+                'Recuperar contraseña requiere el backend',
+              ),
+              child: const Text(
+                '¿La olvidaste?',
+                style: TextStyle(fontSize: 12),
+              ),
             ),
           ],
         ),
@@ -192,7 +198,7 @@ class _LoginForm extends StatelessWidget {
           child: const Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Entrar a PartyEars'),
+              Flexible(child: Text('Entrar a PartyEars')),
               SizedBox(width: 8),
               Icon(Icons.arrow_forward, size: 18),
             ],
@@ -225,9 +231,7 @@ class _LoginForm extends StatelessWidget {
             ),
             TextButton(
               onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => const RegisterScreen(),
-                ),
+                MaterialPageRoute<void>(builder: (_) => const RegisterScreen()),
               ),
               child: const Text('Crear una cuenta'),
             ),

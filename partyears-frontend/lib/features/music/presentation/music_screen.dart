@@ -31,10 +31,12 @@ class _MusicScreenState extends State<MusicScreen> {
   Widget build(BuildContext context) {
     final query = _query.trim().toLowerCase();
     final songs = demoSongs
-        .where((s) =>
-            (_genre == _allGenres || s.genre == _genre) &&
-            (s.title.toLowerCase().contains(query) ||
-                s.artist.toLowerCase().contains(query)))
+        .where(
+          (s) =>
+              (_genre == _allGenres || s.genre == _genre) &&
+              (s.title.toLowerCase().contains(query) ||
+                  s.artist.toLowerCase().contains(query)),
+        )
         .toList();
 
     final gap = isCompact(context) ? 20.0 : 40.0;
@@ -48,7 +50,8 @@ class _MusicScreenState extends State<MusicScreen> {
               child: PageHeader(
                 eyebrow: 'Explora y descubre',
                 title: 'Catálogo musical',
-                subtitle: 'Busca canciones, descubre artistas y agrega música '
+                subtitle:
+                    'Busca canciones, descubre artistas y agrega música '
                     'a tu Party.',
               ),
             ),
@@ -134,7 +137,7 @@ class _MusicScreenState extends State<MusicScreen> {
                   children: [
                     for (var i = 0; i < songs.length; i++) ...[
                       if (i > 0) const Divider(height: 1),
-                      _SongRow(song: songs[i], inParty: widget.inParty),
+                      _SongRow(song: songs[i]),
                     ],
                   ],
                 ),
@@ -145,10 +148,9 @@ class _MusicScreenState extends State<MusicScreen> {
 }
 
 class _SongRow extends StatelessWidget {
-  const _SongRow({required this.song, required this.inParty});
+  const _SongRow({required this.song});
 
   final Song song;
-  final bool inParty;
 
   @override
   Widget build(BuildContext context) {
@@ -187,9 +189,7 @@ class _SongRow extends StatelessWidget {
             onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
-                  inParty
-                      ? 'Agregar "${song.title}" a la cola requiere el backend'
-                      : 'Únete a una party para agregar canciones a la cola',
+                  'Agregar "${song.title}" a la cola requiere el backend',
                 ),
               ),
             ),
