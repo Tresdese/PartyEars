@@ -6,7 +6,9 @@ import sys
 
 def main():
     """Run administrative tasks."""
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+    if 'DJANGO_SETTINGS_MODULE' not in os.environ:
+        sys.exit('Indica el servicio, por ejemplo:\n'
+                 '  DJANGO_SETTINGS_MODULE=config.settings.auth python manage.py runserver 8001')
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:

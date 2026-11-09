@@ -61,88 +61,51 @@ Las dependencias necesarias para el backend se encuentran registradas en:
 requirements.txt
 ```
 
-## 4. Configurar variables de entorno
+## 4. Servicios y bases de datos
 
-El archivo `.env` contiene configuraciones privadas, como las credenciales de PostgreSQL, y no se incluye en GitHub.
+El backend son seis servicios que se despliegan por separado; cada uno corre en su propio proceso. Cada base vive en su propio contenedor PostgreSQL 17 en el servidor (ver `DECISIONES.md` en `/srv/compartido/partyears/`), con su propio puerto y rol:
 
-Si existe un archivo:
+| Servicio | App | Settings | Base | Rol | Puerto BD | Puerto HTTP |
+|---|---|---|---|---|---|---|
+| auth | apps.users | config.settings.auth | partyears_auth | auth_svc | 5441 | 8001 |
+| music | apps.music | config.settings.music | partyears_music | music_svc | 5442 | 8002 |
+| party | apps.parties | config.settings.party | partyears_party | party_svc | 5443 | 8003 |
+| queue | apps.musicqueue | config.settings.queue | partyears_queue | queue_svc | 5444 | 8004 |
+| streaming | apps.streaming | config.settings.streaming | partyears_streaming | streaming_svc | 5445 | 8005 |
+| logs | apps.logs | config.settings.logs | partyears_logs | logs_svc | 5446 | 8006 |
 
-```text
-.env.example
+Regla: una app nunca importa modelos de otra. Las referencias entre servicios son UUID que se validan por contrato.
+
+## 5. Configurar `.env`
+
+```bash
+cp .env.example .env
 ```
 
-crear una copia:
+Pon en `DB_HOST` la IP por la que llegas al servidor (LAN, WireGuard u OpenVPN) y las contraseñas de los roles `*_svc`.
+
+## 6. Migrar y ejecutar un servicio
+
+Cada comando indica el servicio con `DJANGO_SETTINGS_MODULE`:
+
+```bash
+DJANGO_SETTINGS_MODULE=config.settings.auth python manage.py migrate
+DJANGO_SETTINGS_MODULE=config.settings.auth python manage.py runserver 8001
+```
+
+En PowerShell:
 
 ```powershell
-Copy-Item .env.example .env
+$env:DJANGO_SETTINGS_MODULE = "config.settings.auth"
+python manage.py runserver 8001
 ```
 
-Después editar `.env` y colocar las credenciales correspondientes.
+El panel administrativo solo existe en el servicio auth: `http://127.0.0.1:8001/admin/`.
 
-Ejemplo:
+## 7. Conectarse a una base desde la terminal
 
-```env
-DB_NAME=partyears
-DB_USER=partyears_user
-DB_PASSWORD=PASSWORD
-DB_HOST=IP_O_HOST_DE_POSTGRESQL
-DB_PORT=5432
-```
-
-## 5. Aplicar migraciones
-
-Antes de ejecutar Django por primera vez:
-
-```powershell
-python manage.py migrate
-```
-
-Esto crea o actualiza las tablas necesarias en PostgreSQL utilizando las migraciones del proyecto.
-
-## 6. Ejecutar el servidor
-
-Con el entorno virtual activo:
-
-```powershell
-python manage.py runserver
-```
-
-Si todo funciona correctamente se mostrará:
-
-```text
-Starting development server at http://127.0.0.1:8000/
-```
-
-El backend estará disponible en:
-
-```text
-http://127.0.0.1:8000/
-```
-
-El panel administrativo de Django estará disponible en:
-
-```text
-http://127.0.0.1:8000/admin/
-```
-
-## Ejecución habitual
-
-Una vez configurado el proyecto, normalmente solo será necesario abrir PowerShell en:
-
-```text
-PartyEars\partyears-backend
-```
-
-y ejecutar:
-
-```powershell
-.\partyearsBackend
-```
-
-Después iniciar Django:
-
-```powershell
-python manage.py runserver
+```bash
+psql -h IP_DEL_SERVIDOR -p 5441 -U TU_ROL -d partyears_auth   # 5441 auth … 5446 logs
 ```
 
 ## Estructura básica

@@ -14,9 +14,13 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
-from django.contrib import admin
+from django.conf import settings
 from django.urls import path
 
-urlpatterns = [
-    path('admin/', admin.site.urls),
-]
+urlpatterns = []
+
+# Solo el servicio auth tiene admin (ver config/settings/auth.py).
+if 'django.contrib.admin' in settings.INSTALLED_APPS:
+    from django.contrib import admin
+
+    urlpatterns.append(path('admin/', admin.site.urls))
