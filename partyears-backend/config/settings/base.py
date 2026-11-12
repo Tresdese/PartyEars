@@ -1,12 +1,3 @@
-"""
-Configuración común a todos los servicios de PartyEars.
-
-Cada servicio tiene su propio módulo (auth.py, music.py, ...) que importa
-este archivo, agrega su app y apunta a su propia base de datos. Se elige con:
-
-    DJANGO_SETTINGS_MODULE=config.settings.<servicio> python manage.py ...
-"""
-
 import os
 from pathlib import Path
 
@@ -15,7 +6,8 @@ from django.core.exceptions import ImproperlyConfigured
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 
-# shortcut: no soporta comillas ni escapes en .env; usar python-dotenv si se necesitan.
+# Own loader instead of python-dotenv to avoid a dependency for a few lines.
+# shortcut: no quotes or escapes supported in .env; switch to python-dotenv if needed.
 def _load_env(path):
     if not path.exists():
         return
@@ -37,11 +29,8 @@ def env(name):
 
 
 def database(service):
-    """Base y rol propios del servicio; cada base vive en su propio contenedor (ver DECISIONES.md).
-
-    En desarrollo, DB_USER/DB_PASSWORD (cuenta personal) sustituyen al rol <servicio>_svc;
-    el servidor cambia a ese rol al conectar, así que las tablas quedan igual.
-    """
+    # Dev uses a personal account instead of the <service>_svc password: the server switches
+    # to the service role on connect, so table ownership matches production.
     if os.environ.get('DB_USER'):
         user, password = os.environ['DB_USER'], env('DB_PASSWORD')
     else:
@@ -58,17 +47,15 @@ def database(service):
     }
 
 
-# SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-sh=wos8z2mwc1ivff@^@$e*p=_!!i^t5r$7$tu(2ymu^pyj=s2'
 
-# SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
 ALLOWED_HOSTS = []
 
 
-# Sin admin ni sesiones: solo el servicio auth los usa (ver auth.py).
-# django.contrib.auth se queda en todos porque DRF lo necesita para AnonymousUser.
+# No admin or sessions here: only the auth service uses them (see auth.py).
+# django.contrib.auth stays in every service because DRF needs it for AnonymousUser.
 INSTALLED_APPS = [
     'django.contrib.auth',
     'django.contrib.contenttypes',

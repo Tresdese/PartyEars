@@ -33,10 +33,9 @@ class QueueScreen extends StatelessWidget {
           Text('Cola musical', style: textTheme.headlineMedium),
           const SizedBox(height: 8),
           const Text(
-            'Propón canciones, consulta el orden y participa en los saltos.',
+            'Propón canciones y consulta el orden de reproducción.',
           ),
           const SizedBox(height: 24),
-
          
           Card(
             child: Padding(
@@ -90,60 +89,6 @@ class QueueScreen extends StatelessWidget {
                     trailing: Text('3:51'),
                   ),
                 ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-        
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text('Votar para saltar', style: textTheme.titleLarge),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Los participantes pueden votar por omitir la canción actual.',
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Votos registrados'),
-                      Text('2 / 4', style: textTheme.titleMedium),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  const LinearProgressIndicator(value: 0.5),
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Voto registrado (demo sin backend)'),
-                      ),
-                    ),
-                    icon: const Icon(Icons.keyboard_arrow_up),
-                    label: const Text('Votar por saltar (demo)'),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Un solo voto por participante y canción.',
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-
-        
-          const Card(
-            child: ListTile(
-              leading: Icon(Icons.verified_user_outlined),
-              title: Text(
-                'El cambio efectivo de pista depende de la regla de votación configurada por el backend y del permiso del anfitrión. ',
               ),
             ),
           ),
