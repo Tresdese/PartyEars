@@ -82,7 +82,10 @@ Regla: una app nunca importa modelos de otra. Las referencias entre servicios so
 cp .env.example .env
 ```
 
-Pon en `DB_HOST` la IP por la que llegas al servidor (LAN, WireGuard u OpenVPN) y las contraseñas de los roles `*_svc`.
+Pon en `DB_HOST` la IP por la que llegas al servidor (LAN, WireGuard u OpenVPN).
+
+- **En tu PC (desarrollo):** llena `DB_USER` y `DB_PASSWORD` con tu cuenta personal de PostgreSQL. Sirve para los 6 servicios: al conectarte, el servidor te cambia al rol del servicio (`auth_svc`, `music_svc`, ...), así que las tablas quedan con el mismo dueño que en producción.
+- **En el servidor (despliegue):** deja `DB_USER` vacío y llena las contraseñas `*_DB_PASSWORD` de los roles `*_svc`.
 
 ## 6. Migrar y ejecutar un servicio
 

@@ -37,13 +37,21 @@ def env(name):
 
 
 def database(service):
-    """Base y rol propios del servicio; cada base vive en su propio contenedor (ver DECISIONES.md)."""
+    """Base y rol propios del servicio; cada base vive en su propio contenedor (ver DECISIONES.md).
+
+    En desarrollo, DB_USER/DB_PASSWORD (cuenta personal) sustituyen al rol <servicio>_svc;
+    el servidor cambia a ese rol al conectar, así que las tablas quedan igual.
+    """
+    if os.environ.get('DB_USER'):
+        user, password = os.environ['DB_USER'], env('DB_PASSWORD')
+    else:
+        user, password = f'{service}_svc', env(f'{service.upper()}_DB_PASSWORD')
     return {
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
             'NAME': f'partyears_{service}',
-            'USER': f'{service}_svc',
-            'PASSWORD': env(f'{service.upper()}_DB_PASSWORD'),
+            'USER': user,
+            'PASSWORD': password,
             'HOST': env('DB_HOST'),
             'PORT': env(f'{service.upper()}_DB_PORT'),
         }
