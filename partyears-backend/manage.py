@@ -1,11 +1,9 @@
 #!/usr/bin/env python
-"""Django's command-line utility for administrative tasks."""
 import os
 import sys
 
 
 def main():
-    """Run administrative tasks."""
     if 'DJANGO_SETTINGS_MODULE' not in os.environ:
         sys.exit('Indica el servicio, por ejemplo:\n'
                  '  DJANGO_SETTINGS_MODULE=config.settings.auth python manage.py runserver 8001')
