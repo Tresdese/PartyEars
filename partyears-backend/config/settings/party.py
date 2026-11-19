@@ -2,7 +2,9 @@ from .base import *
 from .base import INSTALLED_APPS, database
 import os
 
-INSTALLED_APPS = INSTALLED_APPS + ['apps.parties']
+INSTALLED_APPS = ['daphne'] + INSTALLED_APPS + ['channels', 'apps.parties']
+
+ASGI_APPLICATION = 'config.asgi.application'
 
 DATABASES = database('party')
 
