@@ -58,3 +58,13 @@ El CSV mide lo que mpv cree que reproduce, no lo que sale por la bocina (falta l
 | Fecha | Equipos y red | Método y límite | Error p95 (CSV) | Desfase real (grabación) | Correcciones |
 |---|---|---|---|---|---|
 | 21 nov | Dos clientes en el mismo PC, sin audio (`--mpv-arg=--ao=null`) | saltar, 100 ms | 89 ms y 88 ms | no aplica | 0 |
+| 21 nov | PC (audífonos USB) y servidor Xubuntu (bocinas), LAN, ida y vuelta 4 ms | saltar, 100 ms | 125 ms y 125 ms; entre equipos 78 ms (máx. 103) | no medido | 45 y 35 |
+| 21 nov | Igual | saltar, 200 ms | 132 ms y 136 ms; entre equipos 84 ms (máx. 131) | no medido | 0 y 2 |
+
+Conclusiones:
+
+- Con audio real, `time-pos` de mpv va unos 70 ms detrás de la línea de tiempo y brinca ±40 ms entre lecturas, igual en los dos equipos. Ese sesgo común no los separa (diferencia media entre equipos: −1 ms).
+- Con límite de 100 ms el corrector reacciona a ese ruido: salta cada ~3 s (cortes audibles) sin acercar más los equipos. Con 200 ms casi no corrige y la diferencia entre equipos es la misma. Propuesta para el contrato 5.3: **límite 200 ms, método saltar**.
+- `velocidad` no se comparó: sin deriva real en la LAN no hay nada que corregir y la prueba no distinguiría los métodos.
+- El reloj del servidor se desvió 9 ms en ~15 min (+20 → +29 ms); la re-medición cada 30 s lo cubre.
+- No se midió el desfase acústico real: el micrófono disponible captaba los audífonos ~13 veces más fuerte que la laptop y no hubo un umbral que detectara bien los dos. Tampoco se mide la latencia de cada salida de audio: con Bluetooth (150–250 ms) un equipo sonará atrasado aunque el CSV marque error 0.
