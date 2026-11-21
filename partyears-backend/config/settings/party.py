@@ -28,6 +28,10 @@ JWT_CLAVE_PUBLICA = ((BASE_DIR / os.environ['JWT_CLAVE_PUBLICA_ARCHIVO']).read_t
                      if os.environ.get('JWT_CLAVE_PUBLICA_ARCHIVO') else '')
 
 if os.environ.get('REDIS_URL'):
-    CHANNEL_LAYERS = {'default': {'BACKEND': 'channels_redis.core.RedisChannelLayer', 'CONFIG': {'hosts': [os.environ['REDIS_URL']]}}}
+    # redis-py 8 defaults socket_timeout to 5 s, the same as channels_redis' blocking read
+    # (BZPOPMIN, 5 s): every idle party dropped its WebSockets. The timeout must exceed it.
+    CHANNEL_LAYERS = {'default': {'BACKEND': 'channels_redis.core.RedisChannelLayer',
+                                  'CONFIG': {'hosts': [{'address': os.environ['REDIS_URL'],
+                                                        'socket_timeout': 15}]}}}
 else:
     CHANNEL_LAYERS = {'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}}

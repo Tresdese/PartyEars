@@ -484,15 +484,13 @@ si reproduciendo: posicion = posicion_base_ms + (hora_servidor_ahora - referenci
 si pausada:       posicion = posicion_base_ms
 ```
 
-`hora_servidor_ahora` = hora local + desfase de reloj medido con `reloj.ping` (7.4). Si el audio local se aleja más del límite acordado, el cliente corrige la posición (RF-10, RNF-03).
+`hora_servidor_ahora` = hora local + desfase de reloj medido con `reloj.ping` (7.4). El cliente compara la posición de su reproductor con esta cada ~500 ms y, si se aleja **más de 200 ms**, salta a la posición calculada (RF-10, RNF-03). No debe usarse un límite menor: la posición que reporta un reproductor con audio real varía unos ±40 ms entre lecturas, y con 100 ms el cliente saltaba cada ~3 s sin quedar más sincronizado. En la prueba de T-31 (dos equipos en LAN), la diferencia entre equipos fue de 84 ms (p95) con 0–2 saltos en 2 min. Ver `pruebas/t31/README.md`.
 
 #### `POST /api/v1/queue/parties/{party_id}/cola/elementos/{elemento_id}/terminada` (RF-16)
 
 Requiere `Idempotency-Key`. Lo manda el cliente cuando su audio llega al final. Avanza a la siguiente pendiente **una sola vez**: si el elemento ya no es el actual, responde `200` con el estado vigente sin hacer nada más.
 
 `PENDIENTE (Darlington, T-31 y T-34)`: en la party, ¿se acepta el aviso de cualquier miembro o solo del anfitrión? Propuesta: de cualquier miembro conectado, siempre que hayan pasado al menos `duracion_ms` - 2 s de reproducción según el servidor. Así la party no se atasca si el anfitrión se desconecta.
-
-`PENDIENTE (Darlington, T-31)`: límite de desfase y método de corrección (saltar a la posición o ajustar velocidad). Se define con las mediciones de la prueba de concepto; el SRS propone 1 s para el MVP.
 
 ---
 
@@ -586,7 +584,7 @@ Solo en el WebSocket de `party`, que es el que define la presencia:
 - El cliente se considera desconectado tras **15 s** sin recibir nada del servidor: lo muestra, deshabilita las modificaciones y reintenta conectar.
 - La pertenencia y los permisos se conservan **60 s** desde que el servidor detecta la desconexión (`miembro.reconectado` si vuelve a tiempo).
 
-Medición del desfase de reloj, en el WebSocket de `queue` (sincronización, T-31):
+Medición del desfase de reloj, en el WebSocket de `party` (sincronización, T-31). Va en `party` porque es el único WebSocket que mantiene la presencia y porque queue todavía no tiene WebSocket; si la decisión de 7.1 cambia, se mueve. Solo para clientes autenticados (si no, cierre `4001`):
 
 ```json
 cliente →  { "tipo": "reloj.ping", "datos": { "t_cliente": 1794363600123 } }
@@ -622,6 +620,7 @@ Servidor → cliente, salvo que se indique otra dirección.
 | `anfitrion.cambio` | `{"anterior_id", "nuevo_id", "motivo"}` (`manual`, `sucesion`) | RF-22, RF-31, RF-32 |
 | `party.finalizada` | `{"finalizada_en", "motivo"}` (`anfitrion`, `sin_conectados`) | RF-20 |
 | `chat.mensaje` | Mensaje (formato de 4.6) | RF-26 |
+| `reloj.pong` | Ver 7.4 | RNF-03 |
 
 Al recibir `miembro.expulsado` sobre sí mismo o `party.finalizada`, el cliente detiene el audio, sale de la voz y cierra los tres WebSocket.
 
@@ -631,7 +630,6 @@ Al recibir `miembro.expulsado` sobre sí mismo o `party.finalizada`, el cliente 
 |---|---|---|
 | `cola.actualizada` | Estado de la cola (formato de 5) | RF-11 a RF-13 |
 | `reproduccion.estado` | Estado de reproducción (formato de 5.3) | RF-10, RF-14 a RF-16 |
-| `reloj.pong` | Ver 7.4 | RNF-03 |
 
 **streaming**
 
