@@ -14,4 +14,5 @@ async def publicar(party_id, tipo, datos, version=None):
         'enviado_en': ahora,
     }
 
-    await get_channel_layer().group_send(f'party_{party_id}', {'type': 'evento', 'mensaje': mensaje})
+    await get_channel_layer().group_send(f'party_{party_id}',
+                                         {'type': 'evento', 'mensaje': mensaje})
