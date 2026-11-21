@@ -189,6 +189,19 @@ class WebSocketPartyTests(IsolatedAsyncioTestCase):
         respuesta = await self.autenticar(cliente, token(sub=str(self.anfitrion_id)))
         self.assertEqual(respuesta['tipo'], 'autenticado')
 
+    async def test_token_que_vence_con_la_conexion_abierta_cierra_4001(self):
+        cliente = await self.conectar()
+        await self.autenticar(cliente, token(sub=str(self.anfitrion_id), vence_en=1))
+        salida = await cliente.receive_output(timeout=2.5)
+        self.assertEqual((salida['type'], salida.get('code')), ('websocket.close', 4001))
+
+    async def test_renovar_el_token_antes_de_que_venza_mantiene_la_conexion(self):
+        cliente = await self.conectar()
+        # 2 s instead of 1: exp is whole seconds, so 1 s can run out before the renewal arrives.
+        await self.autenticar(cliente, token(sub=str(self.anfitrion_id), vence_en=2))
+        await self.autenticar(cliente, token(sub=str(self.anfitrion_id)))
+        self.assertTrue(await cliente.receive_nothing(timeout=3))
+
     async def test_reautenticar_con_otro_usuario_cierra_4001(self):
         otro_id = await self.agregar_miembro()
         cliente = await self.conectar()

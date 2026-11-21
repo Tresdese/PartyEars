@@ -25,6 +25,7 @@ class PartyConsumer(AsyncWebsocketConsumer):
         self.usuario_id = None
         self.sesion_id = None
         self.grupo = None
+        self.vencimiento = None
         await self.accept()
         self.cronometro = asyncio.create_task(self.esperar_autenticacion())
 
@@ -35,6 +36,10 @@ class PartyConsumer(AsyncWebsocketConsumer):
         await asyncio.sleep(settings.WS_TIEMPO_AUTENTICAR)
         if not self.esta_autenticado():
             await self.close(code=4008)
+
+    async def cerrar_al_vencer(self, exp):
+        await asyncio.sleep(max(exp - time.time(), 0))
+        await self.close(code=4001)
 
     async def receive(self, text_data=None, bytes_data=None):
         try:
@@ -47,6 +52,9 @@ class PartyConsumer(AsyncWebsocketConsumer):
             return
 
         if mensaje.get('tipo') == 'autenticar':
+            # The deadline covers sending autenticar, not the membership query: every path of
+            # autenticar ends authenticated or closed.
+            self.cronometro.cancel()
             await self.autenticar(mensaje)
         elif not self.esta_autenticado():
             await self.close(code=4001)
@@ -99,6 +107,10 @@ class PartyConsumer(AsyncWebsocketConsumer):
         self.usuario_id = usuario_id
         self.sesion_id = contenido.get('sid')
         self.grupo = f'party_{party_id}'
+        # Timer instead of checking exp on each message: the server pushes events to idle clients.
+        if self.vencimiento is not None:
+            self.vencimiento.cancel()
+        self.vencimiento = asyncio.create_task(self.cerrar_al_vencer(contenido['exp']))
         await self.channel_layer.group_add(self.grupo, self.channel_name)
 
         await self.send(text_data=json.dumps({'tipo': 'autenticado',
@@ -109,5 +121,7 @@ class PartyConsumer(AsyncWebsocketConsumer):
 
     async def disconnect(self, code):
         self.cronometro.cancel()
+        if self.vencimiento is not None:
+            self.vencimiento.cancel()
         if self.grupo is not None:
             await self.channel_layer.group_discard(self.grupo, self.channel_name)
