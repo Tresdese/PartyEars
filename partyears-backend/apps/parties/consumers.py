@@ -1,8 +1,10 @@
+import asyncio
+import json
+
+import jwt
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.conf import settings
-import json
-import jwt
-import asyncio
+
 
 class PartyConsumer(AsyncWebsocketConsumer):
 
@@ -13,12 +15,12 @@ class PartyConsumer(AsyncWebsocketConsumer):
         await self.accept()
         self.cronometro = asyncio.create_task(self.esperar_autenticacion())
 
-    def autenticado(self):
+    def esta_autenticado(self):
         return self.usuario_id is not None
 
     async def esperar_autenticacion(self):
         await asyncio.sleep(settings.WS_TIEMPO_AUTENTICAR)
-        if not self.autenticado():
+        if not self.esta_autenticado():
             await self.close(code=4008)
 
     async def receive(self, text_data=None, bytes_data=None):
@@ -30,10 +32,10 @@ class PartyConsumer(AsyncWebsocketConsumer):
 
         if mensaje.get('tipo') == 'autenticar':
             await self.autenticar(mensaje)
-        elif not self.autenticado():
+        elif not self.esta_autenticado():
             await self.close(code=4001)
-        # shortcut: other message types from authenticated clients are ignored until the
-        # heartbeat ('latido', contract 7.4) is implemented in T-33.
+        # TODO(T-33): other message types from authenticated clients are ignored until the
+        # heartbeat ('latido', contract 7.4) is implemented.
 
     async def autenticar(self, mensaje):
         datos = mensaje.get('datos') or {}
@@ -43,7 +45,8 @@ class PartyConsumer(AsyncWebsocketConsumer):
             contenido = jwt.decode(
                 token,
                 settings.JWT_CLAVE_PUBLICA,
-                # Pinning the algorithm rejects 'alg: none' tokens and HS256 tokens signed with the public key.
+                # Pinning the algorithm rejects 'alg: none' tokens and HS256 tokens
+                # signed with the public key.
                 algorithms=['RS256'],
                 options={'require': ['exp', 'sub']},
             )
