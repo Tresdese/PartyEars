@@ -10,7 +10,7 @@ from rest_framework.test import APIClient
 
 from apps.parties.models import (EventoSalida, InvitacionParty, MiembroParty, ParticipacionParty,
                                  Party)
-from .utilidades import CLAVE_PUBLICA, PruebasBase, hacer_token
+from .utilidades import CLAVE_PUBLICA, PruebasBase, hacer_token, vaciar_tablas_party
 
 
 class PruebasUnirse(PruebasBase):
@@ -205,11 +205,7 @@ class IngresosSimultaneosTests(TransactionTestCase):
     """Plan T-33: con ingresos simultáneos nunca hay más de 20 conectados."""
 
     def tearDown(self):
-        # TRUNCATE instead of relying on TransactionTestCase: it does not flush unmanaged tables.
-        with connection.cursor() as cursor:
-            cursor.execute('TRUNCATE party.party, party.miembro_party, party.anfitrion_party, '
-                           'party.participacion_party, party.invitacion_party, '
-                           'party.operacion_confirmada, party.evento_salida CASCADE')
+        vaciar_tablas_party()
 
     def test_21_ingresos_a_la_vez_no_pasan_de_20_conectados(self):
         anfitrion_id = uuid.uuid4()

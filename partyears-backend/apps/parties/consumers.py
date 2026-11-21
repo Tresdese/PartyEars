@@ -1,10 +1,22 @@
 import asyncio
 import json
 import time
+import uuid
 
 import jwt
+from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.conf import settings
+
+from .servicios import verificar_acceso_websocket
+
+
+def _es_uuid(texto):
+    try:
+        uuid.UUID(texto)
+    except ValueError:
+        return False
+    return True
 
 
 class PartyConsumer(AsyncWebsocketConsumer):
@@ -30,6 +42,9 @@ class PartyConsumer(AsyncWebsocketConsumer):
         except (TypeError, ValueError):
             await self.close(code=4001)
             return
+        if not isinstance(mensaje, dict):
+            await self.close(code=4001)
+            return
 
         if mensaje.get('tipo') == 'autenticar':
             await self.autenticar(mensaje)
@@ -49,8 +64,8 @@ class PartyConsumer(AsyncWebsocketConsumer):
         }))
 
     async def autenticar(self, mensaje):
-        datos = mensaje.get('datos') or {}
-        token = datos.get('token', '')
+        datos = mensaje.get('datos')
+        token = datos.get('token', '') if isinstance(datos, dict) else ''
 
         try:
             contenido = jwt.decode(
@@ -65,14 +80,29 @@ class PartyConsumer(AsyncWebsocketConsumer):
             await self.close(code=4001)
             return
 
-        self.usuario_id = contenido['sub']
-        self.sesion_id = contenido.get('sid')
+        usuario_id = str(contenido['sub'])
+        # Same user instead of any valid token: renewing must not let a connection change owner.
+        es_otro_usuario = self.esta_autenticado() and usuario_id != self.usuario_id
+        if not _es_uuid(usuario_id) or es_otro_usuario:
+            await self.close(code=4001)
+            return
 
         party_id = self.scope['url_route']['kwargs']['party_id']
+        # TODO(T-40): membership is checked only here; an expelled member keeps the socket
+        # until expulsion closes it explicitly.
+        cierre, version = await database_sync_to_async(verificar_acceso_websocket)(party_id,
+                                                                                   usuario_id)
+        if cierre is not None:
+            await self.close(code=cierre)
+            return
+
+        self.usuario_id = usuario_id
+        self.sesion_id = contenido.get('sid')
         self.grupo = f'party_{party_id}'
         await self.channel_layer.group_add(self.grupo, self.channel_name)
 
-        await self.send(text_data=json.dumps({'tipo': 'autenticado', 'datos': {'version': None}}))
+        await self.send(text_data=json.dumps({'tipo': 'autenticado',
+                                              'datos': {'version': version}}))
 
     async def evento(self, mensaje):
         await self.send(text_data=json.dumps(mensaje['mensaje']))

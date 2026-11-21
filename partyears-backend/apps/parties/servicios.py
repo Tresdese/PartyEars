@@ -19,6 +19,9 @@ OPERACION_CREAR = 'party.crear'
 OPERACION_UNIRSE = 'party.unirse'
 INTENTOS_CODIGO = 10
 RECONEXION_CONSERVA_PERMISOS = timedelta(seconds=60)
+CIERRE_NO_ES_MIEMBRO = 4003
+CIERRE_PARTY_NO_EXISTE = 4004
+CIERRE_PARTY_FINALIZADA = 4010
 
 def fecha_iso(valor):
     if valor is None:
@@ -202,6 +205,24 @@ def _puede_conservar_permisos(party, usuario_id, ahora):
               .order_by('-salida_en').first())
     return (ultima is not None and ultima.motivo_salida == 'desconexion'
             and ahora - ultima.salida_en <= RECONEXION_CONSERVA_PERMISOS)
+
+
+def verificar_acceso_websocket(party_id, usuario_id):
+    """Contrato 7.2. Devuelve (código de cierre o None, versión de la party)."""
+    party = Party.objects.filter(id=party_id).first()
+    if party is None:
+        return CIERRE_PARTY_NO_EXISTE, None
+    if party.finalizada_en is not None:
+        return CIERRE_PARTY_FINALIZADA, None
+
+    # Open participation instead of membership alone: whoever left or was expelled keeps
+    # their member row, but must not keep receiving the party's events.
+    esta_conectado = party.participaciones.filter(usuario_id=usuario_id,
+                                                  salida_en__isnull=True).exists()
+    esta_habilitado = party.miembros.filter(usuario_id=usuario_id, estado='habilitado').exists()
+    if not (esta_conectado and esta_habilitado):
+        return CIERRE_NO_ES_MIEMBRO, None
+    return None, party.version
 
 
 def _avisar_conectados(party_id, tipo, datos, version):
