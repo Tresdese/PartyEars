@@ -484,15 +484,13 @@ si reproduciendo: posicion = posicion_base_ms + (hora_servidor_ahora - referenci
 si pausada:       posicion = posicion_base_ms
 ```
 
-`hora_servidor_ahora` = hora local + desfase de reloj medido con `reloj.ping` (7.4). Si el audio local se aleja más del límite acordado, el cliente corrige la posición (RF-10, RNF-03).
+`hora_servidor_ahora` = hora local + desfase de reloj medido con `reloj.ping` (7.4). El cliente compara la posición de su reproductor con esta cada ~500 ms y, si se aleja **más de 200 ms**, salta a la posición calculada (RF-10, RNF-03). No debe usarse un límite menor: la posición que reporta un reproductor con audio real varía unos ±40 ms entre lecturas, y con 100 ms el cliente saltaba cada ~3 s sin quedar más sincronizado. En la prueba de T-31 (dos equipos en LAN), la diferencia entre equipos fue de 84 ms (p95) con 0–2 saltos en 2 min. Ver `pruebas/t31/README.md`.
 
 #### `POST /api/v1/queue/parties/{party_id}/cola/elementos/{elemento_id}/terminada` (RF-16)
 
 Requiere `Idempotency-Key`. Lo manda el cliente cuando su audio llega al final. Avanza a la siguiente pendiente **una sola vez**: si el elemento ya no es el actual, responde `200` con el estado vigente sin hacer nada más.
 
 `PENDIENTE (Darlington, T-31 y T-34)`: en la party, ¿se acepta el aviso de cualquier miembro o solo del anfitrión? Propuesta: de cualquier miembro conectado, siempre que hayan pasado al menos `duracion_ms` - 2 s de reproducción según el servidor. Así la party no se atasca si el anfitrión se desconecta.
-
-`PENDIENTE (Darlington, T-31)`: límite de desfase y método de corrección (saltar a la posición o ajustar velocidad). Se define con las mediciones de la prueba de concepto; el SRS propone 1 s para el MVP.
 
 ---
 

@@ -238,7 +238,7 @@ def main():
     parser.add_argument('--audio', required=True)
     parser.add_argument('--nombre', default=os.uname().nodename)
     parser.add_argument('--metodo', choices=['saltar', 'velocidad'], default='saltar')
-    parser.add_argument('--limite-ms', type=float, default=100)
+    parser.add_argument('--limite-ms', type=float, default=200, help='contrato 5.3')
     parser.add_argument('--cada-ms', type=float, default=500, help='cada cuánto se mide el error')
     parser.add_argument('--csv', default='sincronizacion.csv')
     parser.add_argument('--mpv-arg', action='append', default=[], help='argumento extra para mpv')
