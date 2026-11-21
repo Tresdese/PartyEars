@@ -586,7 +586,7 @@ Solo en el WebSocket de `party`, que es el que define la presencia:
 - El cliente se considera desconectado tras **15 s** sin recibir nada del servidor: lo muestra, deshabilita las modificaciones y reintenta conectar.
 - La pertenencia y los permisos se conservan **60 s** desde que el servidor detecta la desconexión (`miembro.reconectado` si vuelve a tiempo).
 
-Medición del desfase de reloj, en el WebSocket de `queue` (sincronización, T-31):
+Medición del desfase de reloj, en el WebSocket de `party` (sincronización, T-31). Va en `party` porque es el único WebSocket que mantiene la presencia y porque queue todavía no tiene WebSocket; si la decisión de 7.1 cambia, se mueve. Solo para clientes autenticados (si no, cierre `4001`):
 
 ```json
 cliente →  { "tipo": "reloj.ping", "datos": { "t_cliente": 1794363600123 } }
@@ -622,6 +622,7 @@ Servidor → cliente, salvo que se indique otra dirección.
 | `anfitrion.cambio` | `{"anterior_id", "nuevo_id", "motivo"}` (`manual`, `sucesion`) | RF-22, RF-31, RF-32 |
 | `party.finalizada` | `{"finalizada_en", "motivo"}` (`anfitrion`, `sin_conectados`) | RF-20 |
 | `chat.mensaje` | Mensaje (formato de 4.6) | RF-26 |
+| `reloj.pong` | Ver 7.4 | RNF-03 |
 
 Al recibir `miembro.expulsado` sobre sí mismo o `party.finalizada`, el cliente detiene el audio, sale de la voz y cierra los tres WebSocket.
 
@@ -631,7 +632,6 @@ Al recibir `miembro.expulsado` sobre sí mismo o `party.finalizada`, el cliente 
 |---|---|---|
 | `cola.actualizada` | Estado de la cola (formato de 5) | RF-11 a RF-13 |
 | `reproduccion.estado` | Estado de reproducción (formato de 5.3) | RF-10, RF-14 a RF-16 |
-| `reloj.pong` | Ver 7.4 | RNF-03 |
 
 **streaming**
 

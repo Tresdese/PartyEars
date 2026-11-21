@@ -105,3 +105,7 @@ desktop.ini
 *.tmp
 *.bak
 
+# Archivos generados por la prueba de T-31
+pruebas/t31/estado.json
+pruebas/t31/*.csv
+pruebas/t31/*.wav

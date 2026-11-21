@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 
 import jwt
 from channels.generic.websocket import AsyncWebsocketConsumer
@@ -34,8 +35,18 @@ class PartyConsumer(AsyncWebsocketConsumer):
             await self.autenticar(mensaje)
         elif not self.esta_autenticado():
             await self.close(code=4001)
+        elif mensaje.get('tipo') == 'reloj.ping':
+            await self.responder_reloj(mensaje)
         # TODO(T-33): other message types from authenticated clients are ignored until the
         # heartbeat ('latido', contract 7.4) is implemented.
+
+    async def responder_reloj(self, mensaje):
+        datos = mensaje.get('datos')
+        t_cliente = datos.get('t_cliente') if isinstance(datos, dict) else None
+        await self.send(text_data=json.dumps({
+            'tipo': 'reloj.pong',
+            'datos': {'t_cliente': t_cliente, 't_servidor': time.time_ns() // 1_000_000},
+        }))
 
     async def autenticar(self, mensaje):
         datos = mensaje.get('datos') or {}

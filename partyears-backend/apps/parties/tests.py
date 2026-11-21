@@ -196,3 +196,27 @@ class WebSocketPartyTests(IsolatedAsyncioTestCase):
 
         await publicar(self.party_id, 'miembro.unido', {})
         await uno.receive_json_from(timeout=1)
+
+    async def test_reloj_ping_responde_con_la_hora_del_servidor(self):
+        cliente = await self.conectar_autenticado()
+        antes = time.time_ns() // 1_000_000
+
+        await cliente.send_json_to({'tipo': 'reloj.ping', 'datos': {'t_cliente': 123}})
+        respuesta = await cliente.receive_json_from(timeout=1)
+
+        self.assertEqual(respuesta['tipo'], 'reloj.pong')
+        self.assertEqual(respuesta['datos']['t_cliente'], 123)
+        self.assertGreaterEqual(respuesta['datos']['t_servidor'], antes)
+        self.assertLessEqual(respuesta['datos']['t_servidor'], time.time_ns() // 1_000_000)
+
+    async def test_reloj_ping_sin_autenticar_cierra_4001(self):
+        cliente = await self.conectar()
+        await cliente.send_json_to({'tipo': 'reloj.ping', 'datos': {'t_cliente': 123}})
+        salida = await cliente.receive_output(timeout=1)
+        self.assertEqual(salida.get('code'), 4001)
+
+    async def test_reloj_ping_con_datos_invalidos_no_rompe_la_conexion(self):
+        cliente = await self.conectar_autenticado()
+        await cliente.send_json_to({'tipo': 'reloj.ping', 'datos': 'basura'})
+        respuesta = await cliente.receive_json_from(timeout=1)
+        self.assertIsNone(respuesta['datos']['t_cliente'])
