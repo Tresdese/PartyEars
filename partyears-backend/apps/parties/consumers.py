@@ -37,7 +37,7 @@ class PartyConsumer(AsyncWebsocketConsumer):
             await self.close(code=4001)
         elif mensaje.get('tipo') == 'reloj.ping':
             await self.responder_reloj(mensaje)
-        # TODO(T-33): other message types from authenticated clients are ignored until the
+        # TODO(T-38): other message types from authenticated clients are ignored until the
         # heartbeat ('latido', contract 7.4) is implemented.
 
     async def responder_reloj(self, mensaje):
