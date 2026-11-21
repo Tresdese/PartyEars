@@ -5,24 +5,12 @@ from unittest import IsolatedAsyncioTestCase
 import jwt
 from channels.routing import URLRouter
 from channels.testing import WebsocketCommunicator
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
 from django.test import override_settings
 
 from apps.parties.eventos import publicar
 from apps.parties.routing import websocket_urlpatterns
 
-
-def _par_de_claves():
-    privada = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    publica = privada.public_key().public_bytes(
-        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
-    ).decode()
-    return privada, publica
-
-
-CLAVE_PRIVADA, CLAVE_PUBLICA = _par_de_claves()
-OTRA_CLAVE_PRIVADA, _ = _par_de_claves()
+from .utilidades import CLAVE_PRIVADA, CLAVE_PUBLICA, OTRA_CLAVE_PRIVADA
 
 
 def token(clave=CLAVE_PRIVADA, vence_en=300, **cambios):

@@ -4,50 +4,13 @@ import uuid
 from datetime import timedelta
 from unittest.mock import patch
 import jwt
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
 from django.db import IntegrityError, transaction
-from django.test import TestCase, override_settings
 from django.utils import timezone
-from rest_framework.test import APIClient
 from apps.parties.codigos import generar_codigo
 from apps.parties.models import (AnfitrionParty, EventoSalida, InvitacionParty, MiembroParty, OperacionConfirmada, ParticipacionParty, Party)
+from .utilidades import CLAVE_PRIVADA, OTRA_CLAVE_PRIVADA, PruebasBase, hacer_token
 
 CODIGO_VALIDO = re.compile(r'^[A-Z0-9]{6}$')
-
-def _par_de_claves():
-    privada = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    publica = privada.public_key().public_bytes(
-        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
-    ).decode()
-    return privada, publica
-
-CLAVE_PRIVADA, CLAVE_PUBLICA = _par_de_claves()
-OTRA_CLAVE_PRIVADA, _ = _par_de_claves()
-
-def hacer_token(usuario_id=None, clave=CLAVE_PRIVADA, vence_en=300, nombre_usuario='mariana'):
-    ahora = int(time.time())
-    return jwt.encode(
-        {'sub': str(usuario_id or uuid.uuid4()), 'nombre_usuario': nombre_usuario, 'sid': str(uuid.uuid4()), 'iat': ahora, 'exp': ahora + vence_en},
-        clave, algorithm='RS256',
-    )
-
-@override_settings(JWT_CLAVE_PUBLICA=CLAVE_PUBLICA)
-class PruebasBase(TestCase):
-    URL = '/api/v1/party/parties'
-
-    def setUp(self):
-        self.cliente = APIClient()
-
-    def crear(self, usuario_id=None, cuerpo=None, clave=None, nombre_usuario='mariana', token=None):
-        usuario_id = usuario_id or uuid.uuid4()
-        cabeceras = {'HTTP_AUTHORIZATION': f'Bearer {token or hacer_token(usuario_id, nombre_usuario=nombre_usuario)}'}
-        if clave != 'sin_clave': cabeceras['HTTP_IDEMPOTENCY_KEY'] = str(clave or uuid.uuid4())
-        cuerpo = {'nombre': 'Viernes'} if cuerpo is None else cuerpo
-        return self.cliente.post(self.URL, cuerpo, format='json', **cabeceras)
-
-    def consultar_actual(self, usuario_id, nombre_usuario='mariana'):
-        return self.cliente.get(self.URL + '/actual', HTTP_AUTHORIZATION=f'Bearer {hacer_token(usuario_id, nombre_usuario=nombre_usuario)}')
 
 class CrearPartyTests(PruebasBase):
     def test_crea_la_party_con_el_creador_como_anfitrion(self):
