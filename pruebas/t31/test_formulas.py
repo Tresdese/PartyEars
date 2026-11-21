@@ -1,6 +1,8 @@
+import asyncio
+import json
 import unittest
 
-from cliente_sincronizacion import desfase_de_reloj, iso_a_ms, posicion_esperada
+from cliente_sincronizacion import Mpv, desfase_de_reloj, iso_a_ms, posicion_esperada
 
 
 class FormulasTests(unittest.TestCase):
@@ -23,6 +25,24 @@ class FormulasTests(unittest.TestCase):
 
     def test_iso_con_milisegundos(self):
         self.assertEqual(iso_a_ms('1970-01-01T00:00:01.250Z'), 1250)
+
+
+class MpvTests(unittest.IsolatedAsyncioTestCase):
+
+    async def test_una_respuesta_a_un_comando_cancelado_no_detiene_al_lector(self):
+        mpv = Mpv('audio.wav', [])
+        lector = asyncio.StreamReader()
+        mpv.lector = lector
+        cancelado = asyncio.get_running_loop().create_future()
+        cancelado.cancel()
+        pendiente = asyncio.get_running_loop().create_future()
+        mpv.pendientes = {1: cancelado, 2: pendiente}
+        for request_id in (1, 2):
+            lector.feed_data(json.dumps({'request_id': request_id, 'data': None}).encode() + b'\n')
+        lector.feed_eof()
+
+        await mpv._leer()
+        self.assertEqual(pendiente.result()['request_id'], 2)
 
 
 if __name__ == '__main__':

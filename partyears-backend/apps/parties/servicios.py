@@ -1,16 +1,27 @@
 import hashlib
 import json
+import logging
 import uuid
-from datetime import timezone as zona_utc
+from datetime import timedelta, timezone as zona_utc
+from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.db import IntegrityError, connection, transaction
 from django.utils import timezone
+from redis.exceptions import RedisError
 from .codigos import generar_codigo
 from .errores import ErrorApi
+from .eventos import publicar
 from .models import (AnfitrionParty, EventoSalida, InvitacionParty, MiembroParty, OperacionConfirmada, ParticipacionParty, Party)
 
+logger = logging.getLogger(__name__)
+
 OPERACION_CREAR = 'party.crear'
+OPERACION_UNIRSE = 'party.unirse'
 INTENTOS_CODIGO = 10
+RECONEXION_CONSERVA_PERMISOS = timedelta(seconds=60)
+CIERRE_NO_ES_MIEMBRO = 4003
+CIERRE_PARTY_NO_EXISTE = 4004
+CIERRE_PARTY_FINALIZADA = 4010
 
 def fecha_iso(valor):
     if valor is None:
@@ -97,6 +108,132 @@ def party_actual(usuario):
 
     return estado_completo(participacion.party, usuario, renovar_codigo=True)
 
+
+def formatear_miembro(miembro, participacion, nombre_usuario):
+    """Miembro con el formato del contrato (sección 4)."""
+    return {
+        'usuario_id': str(miembro.usuario_id),
+        'nombre_usuario': nombre_usuario,
+        'puede_aportar': miembro.puede_aportar,
+        'puede_modificar_cola': miembro.puede_modificar_cola,
+        'estado': miembro.estado,
+        'conectado': participacion is not None,
+        'orden_ingreso': participacion.orden_ingreso if participacion else None,
+    }
+
+
+@transaction.atomic
+def unirse_party(usuario, codigo, clave):
+    """Ingreso por código como oyente (RF-08, RF-36). Devuelve (estado, código HTTP)."""
+    _bloquear_clave(usuario.id, clave)
+
+    solicitud = huella({'operacion': OPERACION_UNIRSE, 'codigo': codigo})
+    previa = OperacionConfirmada.objects.filter(actor_id=usuario.id, clave=clave).first()
+    if previa is not None:
+        if bytes(previa.solicitud_sha256) != solicitud:
+            raise ErrorApi(409, 'IDEMPOTENCIA_CONFLICTO',
+                           'Esa clave ya se usó con una solicitud distinta.')
+        party = Party.objects.get(id=previa.resultado['party_id'])
+        return estado_completo(party, usuario), previa.codigo_respuesta
+
+    invitacion = InvitacionParty.objects.filter(codigo=codigo, revocada_en__isnull=True).first()
+    if invitacion is None:
+        raise ErrorApi(404, 'CODIGO_INVALIDO', 'Ese código no corresponde a ninguna party.')
+
+    # Row lock instead of counting alone: two simultaneous joins would both see 19
+    # connected and both enter.
+    party = Party.objects.select_for_update().get(id=invitacion.party_id)
+    ahora = timezone.now()
+    if party.finalizada_en is not None:
+        raise ErrorApi(410, 'PARTY_FINALIZADA', 'Esa party ya terminó.')
+    if invitacion.expira_en <= ahora:
+        raise ErrorApi(410, 'CODIGO_EXPIRADO',
+                       'El código ya venció. Pídele uno nuevo al anfitrión.')
+
+    miembro = MiembroParty.objects.filter(party=party, usuario_id=usuario.id).first()
+    if miembro is not None and miembro.estado == 'expulsado':
+        raise ErrorApi(403, 'USUARIO_EXPULSADO', 'El anfitrión te sacó de esta party.')
+
+    abierta = (ParticipacionParty.objects
+               .filter(usuario_id=usuario.id, salida_en__isnull=True).first())
+    if abierta is not None:
+        if abierta.party_id != party.id:
+            raise _error_ya_en_otra_party()
+        return estado_completo(party, usuario), 200
+
+    if party.participaciones.filter(salida_en__isnull=True).count() >= party.capacidad:
+        raise ErrorApi(409, 'PARTY_LLENA', 'La party ya tiene el máximo de personas conectadas.')
+
+    if miembro is None:
+        miembro = MiembroParty.objects.create(party=party, usuario_id=usuario.id,
+                                              incorporado_en=ahora)
+    elif not _puede_conservar_permisos(party, usuario.id, ahora):
+        MiembroParty.objects.filter(id=miembro.id).update(puede_aportar=False,
+                                                          puede_modificar_cola=False)
+        miembro.puede_aportar = miembro.puede_modificar_cola = False
+
+    try:
+        with transaction.atomic():
+            participacion = ParticipacionParty.objects.create(party=party, usuario_id=usuario.id,
+                                                              entrada_en=ahora)
+    except IntegrityError:
+        # Unique index instead of trusting the check above: the same user may be joining
+        # or creating another party in parallel.
+        raise _error_ya_en_otra_party()
+    participacion.refresh_from_db(fields=['orden_ingreso'])
+
+    party.version += 1
+    Party.objects.filter(id=party.id).update(version=party.version)
+
+    OperacionConfirmada.objects.create(
+        actor_id=usuario.id, clave=clave, operacion=OPERACION_UNIRSE, solicitud_sha256=solicitud,
+        codigo_respuesta=200, resultado={'party_id': str(party.id), 'version': party.version},
+        confirmada_en=ahora,
+    )
+    datos = formatear_miembro(miembro, participacion, usuario.nombre_usuario)
+    EventoSalida.objects.create(agregado_id=party.id, version=party.version, tipo='miembro.ingreso',
+                                creado_en=ahora, datos=datos)
+    transaction.on_commit(
+        lambda: _avisar_conectados(party.id, 'miembro.ingreso', datos, party.version))
+
+    return estado_completo(party, usuario), 200
+
+
+def _puede_conservar_permisos(party, usuario_id, ahora):
+    """RF-21: within 60 s of a disconnection the member keeps their permissions."""
+    ultima = (party.participaciones.filter(usuario_id=usuario_id, salida_en__isnull=False)
+              .order_by('-salida_en').first())
+    return (ultima is not None and ultima.motivo_salida == 'desconexion'
+            and ahora - ultima.salida_en <= RECONEXION_CONSERVA_PERMISOS)
+
+
+def verificar_acceso_websocket(party_id, usuario_id):
+    """Contrato 7.2. Devuelve (código de cierre o None, versión de la party)."""
+    party = Party.objects.filter(id=party_id).first()
+    if party is None:
+        return CIERRE_PARTY_NO_EXISTE, None
+    if party.finalizada_en is not None:
+        return CIERRE_PARTY_FINALIZADA, None
+
+    # Open participation instead of membership alone: whoever left or was expelled keeps
+    # their member row, but must not keep receiving the party's events.
+    esta_conectado = party.participaciones.filter(usuario_id=usuario_id,
+                                                  salida_en__isnull=True).exists()
+    esta_habilitado = party.miembros.filter(usuario_id=usuario_id, estado='habilitado').exists()
+    if not (esta_conectado and esta_habilitado):
+        return CIERRE_NO_ES_MIEMBRO, None
+    return None, party.version
+
+
+def _avisar_conectados(party_id, tipo, datos, version):
+    # Logging instead of failing the request: the join is already committed, and members
+    # who miss the live event catch up through the snapshot (contract 7.5).
+    try:
+        async_to_sync(publicar)(str(party_id), tipo, datos, version)
+    except (RedisError, OSError):
+        logger.exception('No se pudo avisar %s de la party %s', tipo, party_id)
+
+
 def estado_completo(party, usuario, renovar_codigo=False):
     """Estado de la party con el formato del contrato (sección 4)."""
     anfitrion = AnfitrionParty.objects.get(party=party)
@@ -113,18 +250,11 @@ def estado_completo(party, usuario, renovar_codigo=False):
                 invitacion.save(update_fields=['expira_en'])
             codigo = invitacion.codigo
 
-    miembros = []
-    for miembro in party.miembros.order_by('id'):
-        participacion = abiertas.get(miembro.usuario_id)
-        miembros.append({
-            'usuario_id': str(miembro.usuario_id),
-            'nombre_usuario': usuario.nombre_usuario if miembro.usuario_id == usuario.id else None,
-            'puede_aportar': miembro.puede_aportar,
-            'puede_modificar_cola': miembro.puede_modificar_cola,
-            'estado': miembro.estado,
-            'conectado': participacion is not None,
-            'orden_ingreso': participacion.orden_ingreso if participacion else None,
-        })
+    miembros = [
+        formatear_miembro(miembro, abiertas.get(miembro.usuario_id),
+                        usuario.nombre_usuario if miembro.usuario_id == usuario.id else None)
+        for miembro in party.miembros.order_by('id')
+    ]
 
     return {
         'id': str(party.id),

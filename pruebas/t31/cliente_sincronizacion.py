@@ -67,7 +67,9 @@ class Mpv:
         async for linea in self.lector:
             respuesta = json.loads(linea)
             futuro = self.pendientes.pop(respuesta.get('request_id'), None)
-            if futuro is not None:
+            # Skipping instead of answering a command whose task was cancelled (a new state
+            # arrived before the start): set_result would raise and stop this reader for good.
+            if futuro is not None and not futuro.done():
                 futuro.set_result(respuesta)
 
     async def comando(self, *args):

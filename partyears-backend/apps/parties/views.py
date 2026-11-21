@@ -1,8 +1,11 @@
+import re
 import uuid
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .errores import datos_invalidos
-from .servicios import crear_party, leer_clave_idempotencia, party_actual
+from .errores import ErrorApi, datos_invalidos
+from .servicios import crear_party, leer_clave_idempotencia, party_actual, unirse_party
+
+FORMATO_CODIGO = re.compile(r'^[A-Z0-9]{6}$')
 
 LONGITUD_MAXIMA_NOMBRE = 100
 
@@ -44,3 +47,25 @@ class PartyActualView(APIView):
         if estado is None:
             return Response(status=204)
         return Response(estado)
+
+
+def validar_codigo(cuerpo):
+    codigo = cuerpo.get('codigo') if isinstance(cuerpo, dict) else None
+    if not isinstance(codigo, str):
+        raise datos_invalidos('Escribe el código de la party.', 'codigo',
+                              ['Este campo es obligatorio.'])
+    # Normalizing instead of rejecting: people type the code by hand, with lowercase or spaces.
+    codigo = codigo.strip().upper()
+    if not FORMATO_CODIGO.match(codigo):
+        raise ErrorApi(404, 'CODIGO_INVALIDO', 'Ese código no corresponde a ninguna party.')
+    return codigo
+
+
+class UnirseView(APIView):
+    """POST /api/v1/party/parties/unirse (RF-08, RF-36)."""
+
+    def post(self, request):
+        clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
+        codigo = validar_codigo(request.data)
+        estado, codigo_http = unirse_party(request.user, codigo, clave)
+        return Response(estado, status=codigo_http)

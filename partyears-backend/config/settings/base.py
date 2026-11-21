@@ -6,8 +6,8 @@ from django.core.exceptions import ImproperlyConfigured
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 
-# Own loader instead of python-dotenv to avoid a dependency for a few lines.
-# shortcut: no quotes or escapes supported in .env; switch to python-dotenv if needed.
+# Own loader instead of python-dotenv to avoid a dependency for a few lines; it does not
+# support quotes or escapes in .env values.
 def _load_env(path):
     if not path.exists():
         return

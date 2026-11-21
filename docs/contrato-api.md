@@ -554,7 +554,9 @@ Cierres del servidor (código de cierre WebSocket):
 | 4010 | La party finalizó |
 | 4008 | No se autenticó a tiempo |
 
-Cuando el token de acceso vence con la conexión abierta, el cliente lo renueva (2.3) y manda otro `autenticar` sin cerrar la conexión.
+Para `party`, "miembro" significa habilitado **y con una participación abierta**: quien salió de la party o fue expulsado recibe 4003 aunque conserve su registro de miembro. Para volver, primero `POST .../unirse` (4.2) y después se conecta el WebSocket.
+
+Antes de que venza el token de acceso (`expira_en` de 2.2), el cliente lo renueva (2.3) y manda otro `autenticar` sin cerrar la conexión. Si el token vence sin renovarse, el servidor cierra con 4001 y el cliente reconecta con un token nuevo. El nuevo token debe ser del mismo usuario; si no, el servidor cierra con 4001. La membresía se vuelve a comprobar en cada `autenticar`.
 
 ### 7.3 Sobre común
 

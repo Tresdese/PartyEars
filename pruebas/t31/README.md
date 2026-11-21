@@ -67,4 +67,5 @@ Conclusiones:
 - Con límite de 100 ms el corrector reacciona a ese ruido: salta cada ~3 s (cortes audibles) sin acercar más los equipos. Con 200 ms casi no corrige y la diferencia entre equipos es la misma. Decidido en el contrato 5.3: **límite 200 ms, método saltar**.
 - `velocidad` no se comparó: sin deriva real en la LAN no hay nada que corregir y la prueba no distinguiría los métodos.
 - El reloj del servidor se desvió 9 ms en ~15 min (+20 → +29 ms); la re-medición cada 30 s lo cubre.
+- **Esto todavía no valida RNF-03.** El SRS pide registrar las salidas de audio con una referencia común, al menos 100 muestras en 10 minutos y 20 pruebas de ingreso o reconexión, y aclara que el progreso que reporta el reproductor no es evidencia suficiente. Los CSV son justo eso, y las corridas duraron ~2 min. Falta la medición acústica.
 - No se midió el desfase acústico real: el micrófono disponible captaba los audífonos ~13 veces más fuerte que la laptop y no hubo un umbral que detectara bien los dos. Tampoco se mide la latencia de cada salida de audio: con Bluetooth (150–250 ms) un equipo sonará atrasado aunque el CSV marque error 0.
