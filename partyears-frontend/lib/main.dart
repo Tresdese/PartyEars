@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'app/party_ears_app.dart';
+import 'core/network/red.dart';
 
-void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  runApp(const PartyEarsApp());
+Future<void> main() async {
+    WidgetsFlutterBinding.ensureInitialized();
+    await Red.iniciar();
+    runApp(const PartyEarsApp());
 }
