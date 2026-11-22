@@ -100,8 +100,6 @@ class PartyConsumer(AsyncWebsocketConsumer):
             return
 
         party_id = self.scope['url_route']['kwargs']['party_id']
-        # TODO(T-40): membership is checked only here; an expelled member keeps the socket
-        # until expulsion closes it explicitly.
         cierre, version = await database_sync_to_async(verificar_acceso_websocket)(party_id,
                                                                                    usuario_id)
         if cierre is not None:
@@ -129,10 +127,10 @@ class PartyConsumer(AsyncWebsocketConsumer):
 
     def cierre_tras(self, evento):
         # Closing here instead of trusting the client: whoever left or whose party ended must
-        # stop receiving updates (RF-19, RF-20), even if the app never closes the socket.
+        # stop receiving updates (RF-19, RF-20, RF-30), even if the app never closes the socket.
         if evento['tipo'] == 'party.finalizada':
             return 4010
-        if evento['tipo'] == 'miembro.salida':
+        if evento['tipo'] in ('miembro.salida', 'miembro.expulsado'):
             saliente = str(evento['datos'].get('usuario_id', '')).lower()
             if self.usuario_id is not None and saliente == self.usuario_id.lower():
                 return 4003

@@ -20,6 +20,8 @@ OPERACION_UNIRSE = 'party.unirse'
 OPERACION_PERMISOS = 'party.permisos'
 OPERACION_SALIR = 'party.salir'
 OPERACION_FINALIZAR = 'party.finalizar'
+OPERACION_EXPULSAR = 'party.expulsar'
+OPERACION_REHABILITAR = 'party.rehabilitar'
 INTENTOS_CODIGO = 10
 RECONEXION_CONSERVA_PERMISOS = timedelta(seconds=60)
 CIERRE_NO_ES_MIEMBRO = 4003
@@ -510,6 +512,84 @@ def finalizar_party(usuario, party_id, clave):
     )
     _guardar_version_y_avisar(party, pendientes)
     return None, 204
+
+
+@transaction.atomic
+def _administrar_miembro(usuario, party_id, miembro_id, version_esperada, clave, operacion,
+                         aplicar):
+    """Validación común de expulsar y rehabilitar (contrato 4.5). Devuelve (None, 204)."""
+    _bloquear_clave(usuario.id, clave)
+    solicitud = huella({'operacion': operacion, 'party_id': str(party_id),
+                        'usuario_id': str(miembro_id), 'version_esperada': version_esperada})
+    party = _party_bloqueada(party_id)
+
+    previa = _buscar_operacion_previa(usuario, clave, solicitud)
+    if previa is not None:
+        return None, previa.codigo_respuesta
+
+    if party.finalizada_en is not None:
+        raise ErrorApi(410, 'PARTY_FINALIZADA', 'La party ya terminó.')
+    if AnfitrionParty.objects.get(party=party).usuario_id != usuario.id:
+        raise ErrorApi(403, 'NO_ES_ANFITRION', 'Solo el anfitrión puede expulsar o rehabilitar.')
+    if party.version != version_esperada:
+        raise ErrorApi(409, 'VERSION_OBSOLETA', 'La party cambió. Recarga para ver la actual.',
+                       {'version_actual': party.version})
+    # CU-23 FA-01: the host leaves through salir or finalizar, never by expelling themselves.
+    if miembro_id == usuario.id:
+        raise ErrorApi(400, 'DATOS_INVALIDOS', 'No puedes expulsarte ni rehabilitarte a ti mismo.')
+    miembro = party.miembros.filter(usuario_id=miembro_id).first()
+    if miembro is None:
+        raise ErrorApi(404, 'NO_ENCONTRADO', 'Esa persona no está en la party.')
+
+    ahora = timezone.now()
+    pendientes = []
+    aplicar(party, miembro, ahora, pendientes)
+    OperacionConfirmada.objects.create(
+        actor_id=usuario.id, clave=clave, operacion=operacion, solicitud_sha256=solicitud,
+        codigo_respuesta=204, resultado={'party_id': str(party.id), 'version': party.version},
+        confirmada_en=ahora,
+    )
+    _guardar_version_y_avisar(party, pendientes)
+    return None, 204
+
+
+def _expulsar(party, miembro, ahora, pendientes):
+    # Already expelled instead of an error: the result the host wants is already in place.
+    if miembro.estado == 'expulsado':
+        return
+    # Permissions dropped too: once rehabilitated, the member comes back as a listener (4.5).
+    MiembroParty.objects.filter(id=miembro.id).update(estado='expulsado', puede_aportar=False,
+                                                      puede_modificar_cola=False)
+    usuario_id = str(miembro.usuario_id)
+    # miembro.expulsado first: the server closes the expelled member's socket on it, so the
+    # member still learns why before the socket goes away.
+    _registrar_evento(party, 'miembro.expulsado', {'usuario_id': usuario_id}, ahora, pendientes)
+    abiertas = party.participaciones.filter(usuario_id=miembro.usuario_id, salida_en__isnull=True)
+    if abiertas.update(salida_en=ahora, motivo_salida='expulsion'):
+        _registrar_evento(party, 'miembro.salida', {'usuario_id': usuario_id,
+                                                    'motivo': 'expulsion'}, ahora, pendientes)
+    # TODO(T-41): streaming must end the member's voice when it consumes miembro.expulsado.
+    finalizar_sin_conectados(party, ahora, pendientes)
+
+
+def _rehabilitar(party, miembro, ahora, pendientes):
+    if miembro.estado == 'habilitado':
+        return
+    MiembroParty.objects.filter(id=miembro.id).update(estado='habilitado')
+    _registrar_evento(party, 'miembro.rehabilitado', {'usuario_id': str(miembro.usuario_id)},
+                      ahora, pendientes)
+
+
+def expulsar_miembro(usuario, party_id, miembro_id, version_esperada, clave):
+    """RF-30, CU-23."""
+    return _administrar_miembro(usuario, party_id, miembro_id, version_esperada, clave,
+                                OPERACION_EXPULSAR, _expulsar)
+
+
+def rehabilitar_miembro(usuario, party_id, miembro_id, version_esperada, clave):
+    """RF-30, CU-23: retira la prohibición sin conectarlo; debe volver a unirse."""
+    return _administrar_miembro(usuario, party_id, miembro_id, version_esperada, clave,
+                                OPERACION_REHABILITAR, _rehabilitar)
 
 
 def leer_clave_idempotencia(valor):
