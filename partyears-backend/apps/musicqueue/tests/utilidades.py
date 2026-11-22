@@ -76,6 +76,16 @@ class BaseCola:
         url = f'{self.url}/elementos/{elemento_id}?version_esperada={version}'
         return self.cliente.delete(url, **self.cabeceras(usuario_id or self.anfitrion_id, clave))
 
+    def reproducir(self, accion, elemento_id=None, posicion_ms=None, usuario_id=None, clave=None):
+        cuerpo = {'accion': accion, 'elemento_id': str(elemento_id) if elemento_id else None,
+                  'posicion_ms': posicion_ms}
+        return self.cliente.post(f'{self.url}/reproduccion', cuerpo, format='json',
+                                 **self.cabeceras(usuario_id or self.anfitrion_id, clave))
+
+    def terminar(self, elemento_id, usuario_id=None, clave=None):
+        return self.cliente.post(f'{self.url}/elementos/{elemento_id}/terminada',
+                                 **self.cabeceras(usuario_id or self.anfitrion_id, clave))
+
     def verificar_error(self, respuesta, estado, codigo):
         self.assertEqual((respuesta.status_code, respuesta.json()['codigo']), (estado, codigo))
 

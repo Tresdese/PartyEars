@@ -5,8 +5,11 @@ from rest_framework.views import APIView
 
 from apps.parties.errores import datos_invalidos
 from .cliente_party import consultar_party
-from .servicios import (agregar_elemento, consultar_cola, leer_clave_idempotencia,
-                        reordenar_elemento, retirar_elemento)
+from .servicios import (agregar_elemento, cambiar_reproduccion, consultar_cola,
+                        leer_clave_idempotencia, reordenar_elemento, retirar_elemento,
+                        terminar_elemento)
+
+ACCIONES = ('iniciar', 'pausar', 'reanudar', 'buscar', 'saltar')
 
 
 def _es_entero(valor):
@@ -79,4 +82,45 @@ class ElementoView(APIView):
         party = consultar_party(request.auth, party_id)
         estado, codigo_http = retirar_elemento(party, request.user.id, elemento_id, version,
                                                clave)
+        return Response(estado, status=codigo_http)
+
+
+def validar_reproduccion(cuerpo):
+    cuerpo = leer_objeto(cuerpo)
+    accion = cuerpo.get('accion')
+    if accion not in ACCIONES:
+        raise datos_invalidos('Esa acción no existe.', 'accion',
+                              [f'Una de: {", ".join(ACCIONES)}.'])
+    elemento_id = None
+    if accion != 'iniciar':
+        elemento_id = leer_uuid(cuerpo.get('elemento_id'), 'elemento_id',
+                                'Falta la canción que estás viendo.')
+    posicion = None
+    if accion == 'buscar':
+        posicion = cuerpo.get('posicion_ms')
+        if not _es_entero(posicion) or posicion < 0:
+            raise datos_invalidos('La posición no es válida.', 'posicion_ms',
+                                  ['Debe ser un entero desde 0, en milisegundos.'])
+    return accion, elemento_id, posicion
+
+
+class ReproduccionView(APIView):
+    """POST /api/v1/queue/parties/{party_id}/cola/reproduccion (RF-14, RF-15)."""
+
+    def post(self, request, party_id):
+        clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
+        accion, elemento_id, posicion = validar_reproduccion(request.data)
+        party = consultar_party(request.auth, party_id)
+        estado, codigo_http = cambiar_reproduccion(party, request.user.id, accion, elemento_id,
+                                                   posicion, clave)
+        return Response(estado, status=codigo_http)
+
+
+class TerminadaView(APIView):
+    """POST /api/v1/queue/parties/{party_id}/cola/elementos/{elemento_id}/terminada (RF-16)."""
+
+    def post(self, request, party_id, elemento_id):
+        clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
+        party = consultar_party(request.auth, party_id)
+        estado, codigo_http = terminar_elemento(party, request.user.id, elemento_id, clave)
         return Response(estado, status=codigo_http)

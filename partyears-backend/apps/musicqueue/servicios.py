@@ -1,7 +1,7 @@
 import hashlib
 import json
 import uuid
-from datetime import timezone as zona_utc
+from datetime import timedelta, timezone as zona_utc
 
 from django.db import connection, transaction
 from django.db.models import Max
@@ -13,6 +13,12 @@ from .models import Cola, ElementoCola, EventoSalida, OperacionConfirmada
 OPERACION_AGREGAR = 'cola.agregar'
 OPERACION_REORDENAR = 'cola.reordenar'
 OPERACION_RETIRAR = 'cola.retirar'
+OPERACION_REPRODUCCION = 'cola.reproduccion'
+OPERACION_TERMINADA = 'cola.terminada'
+# Same lead as the T-31 test (1.5 s): clients receive the state, pre-seek and all start at
+# referencia_en instead of whenever the message reaches each one.
+ADELANTO_ARRANQUE = timedelta(milliseconds=1500)
+ACCIONES_DEL_ANFITRION = ('iniciar', 'pausar', 'reanudar', 'buscar')
 ESTADOS_VISIBLES = ('pendiente', 'reproduciendo', 'pausada')
 PERMISO_APORTAR = 'puede_aportar'
 PERMISO_MODIFICAR = 'puede_modificar_cola'
@@ -37,9 +43,18 @@ def leer_clave_idempotencia(valor):
                        'Falta la cabecera Idempotency-Key o no es un UUID válido.')
 
 
+def es_anfitrion(party, usuario_id):
+    return party['anfitrion_id'] == str(usuario_id)
+
+
+def exigir_anfitrion(party, usuario_id):
+    if not es_anfitrion(party, usuario_id):
+        raise ErrorApi(403, 'NO_ES_ANFITRION', 'Solo el anfitrión controla la reproducción.')
+
+
 def exigir_permiso(party, usuario_id, permiso):
     """El anfitrión siempre puede; los demás, según su permiso (RF-11 a RF-13)."""
-    if party['anfitrion_id'] == str(usuario_id):
+    if es_anfitrion(party, usuario_id):
         return
     miembro = next((m for m in party['miembros'] if m['usuario_id'] == str(usuario_id)), None)
     if miembro is None or not miembro[permiso]:
@@ -75,6 +90,25 @@ def formatear_elemento(elemento):
     }
 
 
+def _elemento_actual(cola):
+    return cola.elementos.filter(estado__in=('reproduciendo', 'pausada')).first()
+
+
+def estado_reproduccion(cola, actual):
+    """Contrato 5.3. Sin actual, la reproducción está detenida."""
+    return {
+        'cola_id': str(cola.id),
+        'version': cola.version,
+        'elemento_id': str(actual.id) if actual else None,
+        'recurso_audio_id': str(actual.recurso_audio_id) if actual else None,
+        'estado': actual.estado if actual else 'detenida',
+        'posicion_base_ms': actual.posicion_base_ms if actual else 0,
+        'referencia_en': fecha_iso(actual.referencia_en) if actual else None,
+        # TODO(T-14): music does not exist yet; the client ends the song by its own player.
+        'duracion_ms': None,
+    }
+
+
 def estado_cola(cola):
     """Estado con el formato del contrato (sección 5)."""
     elementos = list(cola.elementos.filter(estado__in=ESTADOS_VISIBLES).order_by('orden'))
@@ -83,9 +117,8 @@ def estado_cola(cola):
         'id': str(cola.id),
         'modalidad': 'compartida',
         'version': cola.version,
-        # TODO(T-35): 'reproduccion' carries the playback state of 5.3 once playback exists.
         'actual': None if actual is None else {'elemento': formatear_elemento(actual),
-                                               'reproduccion': None},
+                                               'reproduccion': estado_reproduccion(cola, actual)},
         'pendientes': [formatear_elemento(e) for e in elementos if e.estado == 'pendiente'],
     }
 
@@ -109,7 +142,7 @@ def _exigir_version(cola, version_esperada):
                        {'version_actual': cola.version})
 
 
-def _confirmar(cola, usuario_id, clave, operacion, solicitud, codigo_http, ahora):
+def _registrar_operacion(cola, usuario_id, clave, operacion, solicitud, codigo_http, ahora):
     cola.version += 1
     cola.save(update_fields=['version'])
     OperacionConfirmada.objects.create(
@@ -117,11 +150,19 @@ def _confirmar(cola, usuario_id, clave, operacion, solicitud, codigo_http, ahora
         codigo_respuesta=codigo_http, resultado={'cola_id': str(cola.id), 'version': cola.version},
         confirmada_en=ahora,
     )
+
+
+def _emitir(cola, tipo, datos, ahora):
+    # TODO(T-34): nothing delivers these events live yet; members only see the change on
+    # their next GET.
+    EventoSalida.objects.create(agregado_id=cola.id, version=cola.version, tipo=tipo,
+                                datos=datos, creado_en=ahora)
+
+
+def _confirmar(cola, usuario_id, clave, operacion, solicitud, codigo_http, ahora):
+    _registrar_operacion(cola, usuario_id, clave, operacion, solicitud, codigo_http, ahora)
     estado = estado_cola(cola)
-    # TODO(T-34): the queue WebSocket (contract 7.1) does not exist yet; members only see the
-    # change on their next GET.
-    EventoSalida.objects.create(agregado_id=cola.id, version=cola.version,
-                                tipo='cola.actualizada', datos=estado, creado_en=ahora)
+    _emitir(cola, 'cola.actualizada', estado, ahora)
     return estado, codigo_http
 
 
@@ -207,3 +248,123 @@ def retirar_elemento(party, usuario_id, elemento_id, version_esperada, clave):
     elemento.fin_en = ahora
     elemento.save(update_fields=['estado', 'fin_en'])
     return _confirmar(cola, usuario_id, clave, OPERACION_RETIRAR, solicitud, 200, ahora)
+
+
+def _posicion_actual(elemento, ahora):
+    if elemento.estado != 'reproduciendo':
+        return elemento.posicion_base_ms
+    # max() instead of the raw difference: during the start lead referencia_en is in the
+    # future, and the song has not moved yet.
+    transcurrido = max(ahora - elemento.referencia_en, timedelta(0))
+    return elemento.posicion_base_ms + int(transcurrido.total_seconds() * 1000)
+
+
+def _cerrar_actual(actual, estado_final, ahora):
+    actual.estado = estado_final
+    # max() because fin_en cannot precede referencia_en, which is in the future while the
+    # song is still in its start lead.
+    actual.fin_en = max(ahora, actual.referencia_en)
+    actual.save(update_fields=['estado', 'fin_en'])
+
+
+def _iniciar_siguiente(cola, ahora):
+    """Empieza la primera pendiente desde 0; si no hay, la reproducción queda detenida."""
+    siguiente = cola.elementos.filter(estado='pendiente').order_by('orden').first()
+    if siguiente is None:
+        return None
+    siguiente.estado = 'reproduciendo'
+    siguiente.inicio_en = ahora
+    siguiente.referencia_en = ahora + ADELANTO_ARRANQUE
+    siguiente.posicion_base_ms = 0
+    siguiente.save(update_fields=['estado', 'inicio_en', 'referencia_en', 'posicion_base_ms'])
+    return siguiente
+
+
+def _exigir_actual(actual, elemento_id):
+    # The song the user sees instead of "whatever is playing now": two skips sent at once
+    # must skip one song, not two (RF-23).
+    if actual is None or str(actual.id) != str(elemento_id):
+        raise ErrorApi(409, 'ELEMENTO_NO_ACTUAL', 'Esa canción ya no es la que está sonando.')
+
+
+def _aplicar_accion(cola, actual, accion, posicion_ms, ahora):
+    """Cambia la reproducción. Devuelve el nuevo actual (None si queda detenida)."""
+    if accion == 'iniciar':
+        if actual is not None:
+            raise ErrorApi(409, 'REPRODUCCION_EN_CURSO', 'Ya hay una canción sonando.')
+        siguiente = _iniciar_siguiente(cola, ahora)
+        if siguiente is None:
+            raise ErrorApi(409, 'COLA_VACIA', 'Agrega una canción a la cola para empezar.')
+        return siguiente
+
+    if accion == 'saltar':
+        _cerrar_actual(actual, 'omitida', ahora)
+        return _iniciar_siguiente(cola, ahora)
+
+    if accion == 'pausar' and actual.estado == 'reproduciendo':
+        actual.posicion_base_ms = _posicion_actual(actual, ahora)
+        actual.estado = 'pausada'
+        actual.referencia_en = max(ahora, actual.referencia_en)
+    elif accion == 'reanudar' and actual.estado == 'pausada':
+        actual.estado = 'reproduciendo'
+        actual.referencia_en = ahora + ADELANTO_ARRANQUE
+    elif accion == 'buscar':
+        actual.posicion_base_ms = posicion_ms
+        es_pausa = actual.estado == 'pausada'
+        actual.referencia_en = max(ahora, actual.referencia_en) if es_pausa else (
+            ahora + ADELANTO_ARRANQUE)
+    actual.save(update_fields=['estado', 'posicion_base_ms', 'referencia_en'])
+    return actual
+
+
+@transaction.atomic
+def cambiar_reproduccion(party, usuario_id, accion, elemento_id, posicion_ms, clave):
+    """Contrato 5.3. Devuelve (estado de reproducción, código HTTP)."""
+    if accion in ACCIONES_DEL_ANFITRION:
+        exigir_anfitrion(party, usuario_id)
+    else:
+        exigir_permiso(party, usuario_id, PERMISO_MODIFICAR)
+    _bloquear_clave(usuario_id, clave)
+    solicitud = huella({'operacion': OPERACION_REPRODUCCION, 'party_id': party['id'],
+                        'accion': accion, 'elemento_id': elemento_id, 'posicion_ms': posicion_ms})
+    cola = _bloquear_cola(party['id'])
+    previa = _operacion_previa(usuario_id, clave, solicitud)
+    actual = _elemento_actual(cola)
+    if previa is not None:
+        return estado_reproduccion(cola, actual), previa.codigo_respuesta
+
+    if accion != 'iniciar':
+        _exigir_actual(actual, elemento_id)
+    ahora = timezone.now()
+    actual = _aplicar_accion(cola, actual, accion, posicion_ms, ahora)
+    _registrar_operacion(cola, usuario_id, clave, OPERACION_REPRODUCCION, solicitud, 200, ahora)
+    estado = estado_reproduccion(cola, actual)
+    _emitir(cola, 'reproduccion.estado', estado, ahora)
+    if accion in ('iniciar', 'saltar'):
+        _emitir(cola, 'cola.actualizada', estado_cola(cola), ahora)
+    return estado, 200
+
+
+@transaction.atomic
+def terminar_elemento(party, usuario_id, elemento_id, clave):
+    """RF-16. Avanza una sola vez: si ya no es el actual, responde el estado sin cambiarlo."""
+    # TODO(T-14): only the host instead of any member (contract 5.3 proposal): without the
+    # duration from music the server cannot tell a real end from a member skipping songs.
+    exigir_anfitrion(party, usuario_id)
+    _bloquear_clave(usuario_id, clave)
+    solicitud = huella({'operacion': OPERACION_TERMINADA, 'party_id': party['id'],
+                        'elemento_id': str(elemento_id)})
+    cola = _bloquear_cola(party['id'])
+    previa = _operacion_previa(usuario_id, clave, solicitud)
+    actual = _elemento_actual(cola)
+    if previa is not None or actual is None or actual.id != elemento_id:
+        return estado_reproduccion(cola, actual), 200
+
+    ahora = timezone.now()
+    _cerrar_actual(actual, 'reproducida', ahora)
+    actual = _iniciar_siguiente(cola, ahora)
+    _registrar_operacion(cola, usuario_id, clave, OPERACION_TERMINADA, solicitud, 200, ahora)
+    estado = estado_reproduccion(cola, actual)
+    _emitir(cola, 'reproduccion.estado', estado, ahora)
+    _emitir(cola, 'cola.actualizada', estado_cola(cola), ahora)
+    return estado, 200
