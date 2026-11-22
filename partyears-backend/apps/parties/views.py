@@ -3,7 +3,8 @@ import uuid
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from .errores import ErrorApi, datos_invalidos
-from .servicios import crear_party, leer_clave_idempotencia, party_actual, unirse_party
+from .servicios import (cambiar_permisos, crear_party, leer_clave_idempotencia, party_actual,
+                        unirse_party)
 
 FORMATO_CODIGO = re.compile(r'^[A-Z0-9]{6}$')
 
@@ -69,3 +70,30 @@ class UnirseView(APIView):
         codigo = validar_codigo(request.data)
         estado, codigo_http = unirse_party(request.user, codigo, clave)
         return Response(estado, status=codigo_http)
+
+
+def validar_permisos(cuerpo):
+    if not isinstance(cuerpo, dict):
+        raise datos_invalidos('El cuerpo de la petición debe ser un objeto JSON.')
+    for campo in ('puede_aportar', 'puede_modificar_cola'):
+        if not isinstance(cuerpo.get(campo), bool):
+            raise datos_invalidos('Indica cada permiso como true o false.', campo,
+                                  ['Debe ser true o false.'])
+    version = cuerpo.get('version_esperada')
+    # bool excluded on purpose: in Python True is an int, and JSON true is not a version.
+    if not isinstance(version, int) or isinstance(version, bool) or version < 0:
+        raise datos_invalidos('Falta la versión de la party que estás viendo.',
+                              'version_esperada', ['Debe ser un entero.'])
+    return cuerpo['puede_aportar'], cuerpo['puede_modificar_cola'], version
+
+
+class PermisosView(APIView):
+    """PUT /api/v1/party/parties/{party_id}/miembros/{usuario_id}/permisos (RF-17, RF-18)."""
+
+    def put(self, request, party_id, usuario_id):
+        clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
+        puede_aportar, puede_modificar_cola, version = validar_permisos(request.data)
+        resultado, codigo_http = cambiar_permisos(request.user, party_id, usuario_id,
+                                                  puede_aportar, puede_modificar_cola, version,
+                                                  clave)
+        return Response(resultado, status=codigo_http)
