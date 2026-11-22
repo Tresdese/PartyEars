@@ -14,6 +14,7 @@ import 'data/cola_models.dart';
 import 'data/cola_service.dart';
 import 'data/party_models.dart';
 import 'data/party_service.dart';
+import 'segundo_plano.dart';
 import 'sincronizacion.dart';
 
 /// Lo que la pantalla de party necesita mientras se está dentro (T-55): la party, la cola,
@@ -76,6 +77,10 @@ class SesionParty extends ChangeNotifier {
     String? errorAudio;
     WsMotivoCierre? cierre;
     bool _cerrada = false;
+    // The server told this socket that the person left or was expelled (contract 7.4).
+    bool _meSacaron = false;
+    Timer? _timerReingreso;
+    static const _esperaReingreso = Duration(seconds: 3);
     final _suscripciones = <StreamSubscription<Object?>>[];
     Timer? _timerReloj;
     Timer? _pings;
@@ -182,9 +187,10 @@ class SesionParty extends ChangeNotifier {
         _suscripciones
             ..add(ws.estado.listen((e) => _cambiar(() => _conexion = e)))
             ..add(ws.eventos.listen((e) => unawaited(_alEvento(e))))
-            ..add(ws.cierres.listen((motivo) => _cambiar(() => cierre = motivo)))
+            ..add(ws.cierres.listen((motivo) => unawaited(_alCerrarWs(motivo))))
             ..add(reproductor.errores.listen((m) => _cambiar(() => errorAudio = m)))
             ..add(reproductor.terminado.listen((_) => unawaited(_alTerminar())));
+        await SegundoPlano.mantener(_party.nombre);
         await ws.conectar();
         _timerReloj = Timer.periodic(_periodoReloj, (_) => _medirReloj(_pingsPeriodicos));
     }
@@ -215,8 +221,48 @@ class SesionParty extends ChangeNotifier {
                 // Members, permissions and host: a fresh snapshot instead of patching each event.
                 // It is one small GET for at most 20 members and never drifts from the server.
                 if (evento.tipo.startsWith('miembro.') || evento.tipo.startsWith('anfitrion.')) {
+                    final esSalida = evento.tipo == 'miembro.salida' || evento.tipo == 'miembro.expulsado';
+                    if (esSalida && evento.datos['usuario_id'] == usuarioId) _meSacaron = true;
                     await _pedirParty();
                 }
+        }
+    }
+
+    // Contract 7.5 step 6: a 4003 nobody announced means the server detected a disconnection
+    // (15 s without heartbeat). Coming back through unirse keeps the permissions within 60 s
+    // (RF-21) instead of throwing the person out of a party they never left.
+    Future<void> _alCerrarWs(WsMotivoCierre motivo) async {
+        final codigo = PartyService.codigosDeIngreso[_party.id] ?? _party.codigo;
+        if (motivo != WsMotivoCierre.sinAcceso || _meSacaron || codigo == null) {
+            _cambiar(() => cierre = motivo);
+            return;
+        }
+        await _volverAUnirse(codigo);
+    }
+
+    Future<void> _volverAUnirse(String codigo) async {
+        if (_cerrada) return;
+        _cambiar(() => _conexion = WsEstado.reconectando);
+        try {
+            final party = await partyService.unirse(codigo);
+            if (_cerrada) return;
+            // The new snapshot instead of the old one: after a succession the former host
+            // comes back as a listener and loses the code (contract 4).
+            _cambiar(() => _party = party);
+            await ws.conectar();
+        } on ApiException catch (e) {
+            if (_cerrada) return;
+            if (e.esDeRed) {
+                // Still offline: keep trying, the code lasts 24 h on the server.
+                _timerReingreso = Timer(_esperaReingreso, () => unawaited(_volverAUnirse(codigo)));
+                return;
+            }
+            // Expelled meanwhile, party over, full: the server's answer is final.
+            _cambiar(() => cierre = switch (e.codigo) {
+                'PARTY_FINALIZADA' => WsMotivoCierre.partyFinalizada,
+                ApiException.sesionExpirada => WsMotivoCierre.sesionInvalida,
+                _ => WsMotivoCierre.sinAcceso,
+            });
         }
     }
 
@@ -311,6 +357,7 @@ class SesionParty extends ChangeNotifier {
         if (_cerrada) return;
         _cerrada = true;
         _timerReloj?.cancel();
+        _timerReingreso?.cancel();
         _pings?.cancel();
         if (!_relojListo.isCompleted) _relojListo.complete();
         sincronizador.cerrar();
@@ -319,6 +366,7 @@ class SesionParty extends ChangeNotifier {
         }
         await reproductor.cerrar();
         await ws.cerrar();
+        await SegundoPlano.soltar();
     }
 
     @override

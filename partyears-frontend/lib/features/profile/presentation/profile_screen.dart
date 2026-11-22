@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/demo_data.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/common.dart';
+import '../../party/sincronizacion.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -17,6 +18,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _notifications = true;
   bool _autoplay = true;
   bool _highQuality = false;
+  Duration _retraso = RetrasoAudio.valor;
+
+  static const _pasoRetraso = Duration(milliseconds: 20);
+
+  void _cambiarRetraso(int pasos) {
+    final ms = (_retraso + _pasoRetraso * pasos).inMilliseconds
+        .clamp(0, RetrasoAudio.maximo.inMilliseconds);
+    setState(() => _retraso = Duration(milliseconds: ms));
+    RetrasoAudio.guardar(_retraso);
+  }
 
   void _showMessage(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -172,6 +183,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
             trailing: _PrefSwitch(
               value: _highQuality,
               onChanged: (v) => _updatePreference(() => _highQuality = v),
+            ),
+          ),
+          _SettingRow(
+            title: 'Retraso del altavoz',
+            description: 'Súbelo si este dispositivo suena después que los demás '
+                'en una party (por ejemplo, con audífonos Bluetooth).',
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: 'Menos retraso',
+                  onPressed: _retraso > Duration.zero ? () => _cambiarRetraso(-1) : null,
+                  icon: const Icon(Icons.remove, size: 18),
+                ),
+                Text('${_retraso.inMilliseconds} ms'),
+                IconButton(
+                  tooltip: 'Más retraso',
+                  onPressed: _retraso < RetrasoAudio.maximo ? () => _cambiarRetraso(1) : null,
+                  icon: const Icon(Icons.add, size: 18),
+                ),
+              ],
             ),
           ),
           const _SettingRow(

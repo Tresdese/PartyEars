@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:partyears_frontend/core/network/api_exception.dart';
 import 'package:partyears_frontend/core/network/simulado.dart';
 import 'package:partyears_frontend/core/network/ws_client.dart';
 import 'package:partyears_frontend/features/party/data/cola_models.dart';
@@ -113,6 +114,48 @@ void main() {
         await procesar();
         expect(sesion.cierre, WsMotivoCierre.partyFinalizada);
         expect(reproductor.cerrado, isTrue);
+    });
+
+    group('4003 tras una desconexión (contrato 7.5 paso 6)', () {
+        test('vuelve a unirse con el código y reconecta', () async {
+            ws.simularCierre(WsMotivoCierre.sinAcceso);
+            await Future<void>.delayed(const Duration(milliseconds: 400));
+
+            expect(partyService.reingresos, ['K7Q2ZP']);
+            expect(sesion.cierre, isNull);
+            expect(sesion.conectada, isTrue);
+        });
+
+        test('si el servidor avisó que lo expulsaron, sale sin intentar volver', () async {
+            sesion.usuarioId = 'u2';
+            ws.emitir('miembro.expulsado', datos: {'usuario_id': 'u2'});
+            await procesar();
+            ws.simularCierre(WsMotivoCierre.sinAcceso);
+            await procesar();
+
+            expect(partyService.reingresos, isEmpty);
+            expect(sesion.cierre, WsMotivoCierre.sinAcceso);
+        });
+
+        test('si al volver el servidor dice que la party terminó, la cierra', () async {
+            partyService.errorUnirse = const ApiException(codigo: 'PARTY_FINALIZADA', mensaje: 'x', estadoHttp: 410);
+            ws.simularCierre(WsMotivoCierre.sinAcceso);
+            await procesar();
+
+            expect(sesion.cierre, WsMotivoCierre.partyFinalizada);
+        });
+
+        test('sin red sigue intentando en vez de sacarlo', () async {
+            partyService.errorUnirse = const ApiException(codigo: ApiException.sinConexion, mensaje: 'x');
+            ws.simularCierre(WsMotivoCierre.sinAcceso);
+            await procesar();
+            partyService.errorUnirse = null;
+            await Future<void>.delayed(const Duration(milliseconds: 3400));
+
+            expect(partyService.reingresos.length, 2);
+            expect(sesion.cierre, isNull);
+            expect(sesion.conectada, isTrue);
+        });
     });
 
     test('lee el usuario del token', () {

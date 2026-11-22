@@ -96,6 +96,48 @@ void main() {
             expect(reproductor.llamadas.last, startsWith('irA 5'));
         });
 
+        test('tras corregir espera antes de volver a revisar', () async {
+            final referencia = DateTime.now().toUtc().subtract(const Duration(seconds: 5));
+            await sincronizador.aplicar(estado('reproduciendo', referencia: referencia));
+            reproductor.posicionActual = const Duration(seconds: 1);
+            await sincronizador.revisar();
+            await sincronizador.revisar();
+            expect(sincronizador.correcciones, 1);
+        });
+
+        test('si el salto queda atrás, el siguiente apunta más adelante', () async {
+            final rapido = Sincronizador(reproductor: reproductor, reloj: RelojServidor(), abrirAudio: (_, _) async {},
+                                         periodo: const Duration(hours: 1), pausaTrasCorregir: Duration.zero);
+            addTearDown(rapido.cerrar);
+            final referencia = DateTime.now().toUtc().subtract(const Duration(seconds: 5));
+            await rapido.aplicar(estado('reproduciendo', referencia: referencia));
+            reproductor.posicionActual = const Duration(seconds: 1);
+            await rapido.revisar();
+            // The seek landed 800 ms late, as on a phone over Wi-Fi.
+            final esperada = DateTime.now().toUtc().difference(referencia);
+            reproductor.posicionActual = esperada - const Duration(milliseconds: 800);
+            await rapido.revisar();
+
+            final destino = int.parse(reproductor.llamadas.last.split(' ').last);
+            expect(destino - esperada.inMilliseconds, inInclusiveRange(700, 900));
+        });
+
+        test('con retraso del altavoz el reproductor va adelantado esa cantidad', () async {
+            final conRetraso = Sincronizador(reproductor: reproductor, reloj: RelojServidor(), abrirAudio: (_, _) async {},
+                                             periodo: const Duration(hours: 1), retraso: () => const Duration(milliseconds: 300));
+            addTearDown(conRetraso.cerrar);
+            final referencia = DateTime.now().toUtc().subtract(const Duration(seconds: 5));
+            await conRetraso.aplicar(estado('reproduciendo', referencia: referencia));
+            final esperada = DateTime.now().toUtc().difference(referencia);
+
+            final destino = int.parse(reproductor.llamadas.lastWhere((l) => l.startsWith('irA')).split(' ').last);
+            expect(destino - esperada.inMilliseconds, inInclusiveRange(250, 350));
+            // Sounding on time is within the limit: no correction.
+            reproductor.posicionActual = esperada + const Duration(milliseconds: 300);
+            await conRetraso.revisar();
+            expect(conRetraso.correcciones, 0);
+        });
+
         test('no salta si está dentro del límite', () async {
             final referencia = DateTime.now().toUtc().subtract(const Duration(seconds: 5));
             await sincronizador.aplicar(estado('reproduciendo', referencia: referencia));
