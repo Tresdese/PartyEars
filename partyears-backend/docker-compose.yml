@@ -1,0 +1,80 @@
+services:
+  db-auth:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: partyears_auth
+      POSTGRES_USER: ${DB_USER:-auth_svc}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-${AUTH_DB_PASSWORD}}
+    ports:
+      - "${AUTH_DB_PORT:-5441}:5432"
+    volumes:
+      - pgdata_auth:/var/lib/postgresql/data
+
+  db-music:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: partyears_music
+      POSTGRES_USER: ${DB_USER:-music_svc}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-${MUSIC_DB_PASSWORD}}
+    ports:
+      - "${MUSIC_DB_PORT:-5442}:5432"
+    volumes:
+      - pgdata_music:/var/lib/postgresql/data
+
+  db-party:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: partyears_party
+      POSTGRES_USER: ${DB_USER:-party_svc}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-${PARTY_DB_PASSWORD}}
+    ports:
+      - "${PARTY_DB_PORT:-5443}:5432"
+    volumes:
+      - pgdata_party:/var/lib/postgresql/data
+
+  db-queue:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: partyears_queue
+      POSTGRES_USER: ${DB_USER:-queue_svc}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-${QUEUE_DB_PASSWORD}}
+    ports:
+      - "${QUEUE_DB_PORT:-5444}:5432"
+    volumes:
+      - pgdata_queue:/var/lib/postgresql/data
+
+  db-streaming:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: partyears_streaming
+      POSTGRES_USER: ${DB_USER:-streaming_svc}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-${STREAMING_DB_PASSWORD}}
+    ports:
+      - "${STREAMING_DB_PORT:-5445}:5432"
+    volumes:
+      - pgdata_streaming:/var/lib/postgresql/data
+
+  db-logs:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: partyears_logs
+      POSTGRES_USER: ${DB_USER:-logs_svc}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-${LOGS_DB_PASSWORD}}
+    ports:
+      - "${LOGS_DB_PORT:-5446}:5432"
+    volumes:
+      - pgdata_logs:/var/lib/postgresql/data
+
+volumes:
+  pgdata_auth:
+  pgdata_music:
+  pgdata_party:
+  pgdata_queue:
+  pgdata_streaming:
+  pgdata_logs:
