@@ -13,6 +13,13 @@ class ColaService {
         return EstadoCola.desdeJson(_comoMapa(await _api.get(Servicio.queue, '/parties/$partyId/cola')));
     }
 
+    /// RF-11: agrega al final de la cola sin interrumpir la canción actual.
+    Future<EstadoCola> agregar(String partyId, String recursoAudioId, {String? clave}) async {
+        final respuesta = await _api.post(Servicio.queue, '/parties/$partyId/cola/elementos',
+                                          cuerpo: {'recurso_audio_id': recursoAudioId}, idempotente: true, idempotencyKey: clave);
+        return EstadoCola.desdeJson(_comoMapa(respuesta));
+    }
+
     /// accion: iniciar, pausar, reanudar, buscar o saltar.
     Future<EstadoReproduccion> reproduccion(String partyId, String accion, {String? elementoId, int? posicionMs}) async {
         final respuesta = await _api.post(Servicio.queue, '/parties/$partyId/cola/reproduccion',

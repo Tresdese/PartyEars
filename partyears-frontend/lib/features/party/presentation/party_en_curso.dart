@@ -6,6 +6,7 @@ import '../../../core/widgets/common.dart';
 import '../../voice/presentation/voice_screen.dart';
 import '../data/party_models.dart';
 import '../sesion_party.dart';
+import 'agregar_cancion_screen.dart';
 
 /// Pantalla de una party en curso (T-55): canción, cola, participantes y conexión.
 class PartyEnCurso extends StatefulWidget {
@@ -31,6 +32,20 @@ class _PartyEnCursoState extends State<PartyEnCurso> {
     void dispose() {
         _sesion.dispose();
         super.dispose();
+    }
+
+    void _mostrar(String mensaje) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mensaje)));
+    }
+
+    void _abrirCatalogo() {
+        Navigator.of(context).push(MaterialPageRoute<void>(
+            builder: (_) => AgregarCancionScreen(buscar: _sesion.buscarCanciones!, agregar: _sesion.agregar),
+        ));
+    }
+
+    Future<void> _cambiarPermisos(MiembroParty miembro, bool aportar, bool modificar) async {
+        _mostrar(await _sesion.cambiarPermisos(miembro, puedeAportar: aportar, puedeModificarCola: modificar));
     }
 
     @override
@@ -60,14 +75,33 @@ class _PartyEnCursoState extends State<PartyEnCurso> {
                         _Aviso(texto: _sesion.errorAudio!, accion: 'Reintentar', alPresionar: _sesion.reintentarAudio),
                     _Sonando(sesion: _sesion),
                     const Divider(height: 32),
-                    Text('Siguen en la cola', style: Theme.of(context).textTheme.titleMedium),
+                    Row(
+                        children: [
+                            Expanded(child: Text('Siguen en la cola', style: Theme.of(context).textTheme.titleMedium)),
+                            // Hidden instead of disabled without permission (T-56: hide controls by permission).
+                            if (_sesion.puedeAportar && _sesion.buscarCanciones != null)
+                                TextButton.icon(
+                                    onPressed: _sesion.conectada ? _abrirCatalogo : null,
+                                    icon: const Icon(Icons.add),
+                                    label: const Text('Agregar canción'),
+                                ),
+                        ],
+                    ),
                     if (_sesion.cola.pendientes.isEmpty)
                         const ListTile(title: Text('La cola está vacía.')),
                     for (final (i, e) in _sesion.cola.pendientes.indexed)
                         ListTile(leading: Text('${i + 1}'), title: Text(nombreCancion(e.recursoAudioId))),
                     const Divider(height: 32),
                     Text('Participantes', style: Theme.of(context).textTheme.titleMedium),
-                    for (final m in _sesion.party.miembros) _Participante(miembro: m, esAnfitrion: m.usuarioId == _sesion.party.anfitrionId),
+                    for (final m in _sesion.party.miembros)
+                        _Participante(
+                            miembro: m,
+                            esAnfitrion: m.usuarioId == _sesion.party.anfitrionId,
+                            // P-07 only for the host, and never on the host's own row (contract 4.4).
+                            permisos: _sesion.esAnfitrion && m.usuarioId != _sesion.party.anfitrionId && _sesion.conectada
+                                ? (aportar, modificar) => _cambiarPermisos(m, aportar, modificar)
+                                : null,
+                        ),
                     const Divider(height: 32),
                     ListTile(
                         leading: const Icon(Icons.mic_none),
@@ -177,10 +211,13 @@ class _Conexion extends StatelessWidget {
 }
 
 class _Participante extends StatelessWidget {
-    const _Participante({required this.miembro, required this.esAnfitrion});
+    const _Participante({required this.miembro, required this.esAnfitrion, this.permisos});
 
     final MiembroParty miembro;
     final bool esAnfitrion;
+
+    /// Solo para el anfitrión (P-07): recibe los dos permisos nuevos.
+    final void Function(bool puedeAportar, bool puedeModificarCola)? permisos;
 
     @override
     Widget build(BuildContext context) {
@@ -188,7 +225,32 @@ class _Participante extends StatelessWidget {
         return ListTile(
             leading: StatusDot(color: miembro.conectado ? AppColors.success : AppColors.muted),
             title: Text(esAnfitrion ? '$nombre (anfitrión)' : nombre),
-            subtitle: Text(miembro.conectado ? 'Conectado' : 'Desconectado'),
+            // Chips under the name instead of as trailing: two chips overflow a 360 px phone row.
+            subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                    Text(miembro.conectado ? 'Conectado' : 'Desconectado'),
+                    if (permisos != null)
+                        Wrap(
+                            spacing: 8,
+                            children: [
+                                // Granting needs the member connected (CU-13); taking away does not (CU-14).
+                                FilterChip(
+                                    label: const Text('Agregar canciones'),
+                                    selected: miembro.puedeAportar,
+                                    onSelected: miembro.conectado || miembro.puedeAportar
+                                        ? (valor) => permisos!(valor, miembro.puedeModificarCola) : null,
+                                ),
+                                FilterChip(
+                                    label: const Text('Modificar la cola'),
+                                    selected: miembro.puedeModificarCola,
+                                    onSelected: miembro.conectado || miembro.puedeModificarCola
+                                        ? (valor) => permisos!(miembro.puedeAportar, valor) : null,
+                                ),
+                            ],
+                        ),
+                ],
+            ),
         );
     }
 }

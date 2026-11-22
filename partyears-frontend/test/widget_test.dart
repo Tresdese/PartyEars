@@ -42,6 +42,10 @@ class _PartyFalso implements PartyService {
 
     @override
     Future<PartyActual> consultar(String partyId) => crear('Consultada');
+
+    @override
+    Future<int> cambiarPermisos(String partyId, String usuarioId, {required bool puedeAportar, required bool puedeModificarCola,
+                                required int versionEsperada}) async => versionEsperada + 1;
 }
 
 void main() {

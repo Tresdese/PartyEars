@@ -150,6 +150,23 @@ void main() {
         expect(miembro.reproduccion.elementoId, anfitrion.reproduccion.elementoId);
         expect(miembro.conexion, WsEstado.conectado);
 
+        // T-56: the host grants "add songs", the member adds one and the host sees it live.
+        final yo = miembro.party.miembro(miembro.usuarioId)!;
+        expect(await miembro.agregar('00000000-0000-4000-8000-000000000009'),
+               'Ya no tienes permiso para agregar canciones a esta party');
+        expect(await anfitrion.cambiarPermisos(yo, puedeAportar: true, puedeModificarCola: false),
+               'Permisos otorgados correctamente');
+        await _esperarHasta(() => miembro.puedeAportar);
+        expect(await miembro.agregar('00000000-0000-4000-8000-000000000009'), 'Canción agregada a la cola');
+        await _esperarHasta(() => anfitrion.cola.pendientes.any((e) => e.recursoAudioId.endsWith('9')));
+
+        final conPermiso = miembro.party.miembro(miembro.usuarioId)!;
+        expect(await anfitrion.cambiarPermisos(conPermiso, puedeAportar: false, puedeModificarCola: false),
+               'Permisos retirados correctamente');
+        await _esperarHasta(() => !miembro.puedeAportar);
+        expect(await miembro.agregar('00000000-0000-4000-8000-000000000008'),
+               'Ya no tienes permiso para agregar canciones a esta party');
+
         await miembro.cerrar();
         await anfitrion.cerrar();
         await music.close(force: true);

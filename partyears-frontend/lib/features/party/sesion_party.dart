@@ -7,6 +7,7 @@ import '../../core/network/api_config.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/network/red.dart';
 import '../../core/network/ws_client.dart';
+import '../music/data/catalogo_service.dart';
 import '../player/audio_backend.dart';
 import '../player/reproductor.dart';
 import 'data/cola_models.dart';
@@ -27,6 +28,7 @@ class SesionParty extends ChangeNotifier {
         required Future<void> Function(String recursoAudioId, Duration desde) abrirAudio,
         this.usuarioId,
         this.leerUsuario,
+        this.buscarCanciones,
         RelojServidor? reloj,
     }) : reloj = reloj ?? RelojServidor() {
         sincronizador = Sincronizador(reproductor: reproductor, reloj: this.reloj, abrirAudio: abrirAudio);
@@ -43,6 +45,7 @@ class SesionParty extends ChangeNotifier {
             reproductor: reproductor,
             abrirAudio: (recurso, desde) => abrirRecurso(reproductor, recurso, desde: desde),
             leerUsuario: () async => usuarioDelToken((await red.api.tokensVigentes()).tokenAcceso),
+            buscarCanciones: CatalogoService(red.api).buscar,
         );
     };
 
@@ -60,6 +63,9 @@ class SesionParty extends ChangeNotifier {
     /// Id del usuario de esta sesión, para saber sus permisos. Si es null se usa [leerUsuario].
     String? usuarioId;
     final Future<String?> Function()? leerUsuario;
+
+    /// Búsqueda del catálogo para P-06 (contrato 3.1).
+    final Future<List<CancionCatalogo>> Function(String texto)? buscarCanciones;
     Completer<void> _relojListo = Completer<void>();
 
     PartyActual _party;
@@ -83,6 +89,51 @@ class SesionParty extends ChangeNotifier {
     // The server only sends the invitation code to the host (contract 4).
     bool get esAnfitrion => _party.codigo != null || (usuarioId != null && usuarioId == _party.anfitrionId);
     bool get puedeSaltar => esAnfitrion || (_party.miembro(usuarioId)?.puedeModificarCola ?? false);
+    bool get puedeAportar => esAnfitrion || (_party.miembro(usuarioId)?.puedeAportar ?? false);
+
+    String? _claveAgregar;
+    String? _recursoReintento;
+
+    /// CU-11 en modo compartido. Devuelve el mensaje para el usuario.
+    Future<String> agregar(String recursoAudioId) async {
+        // Same key when retrying the same song after a network failure (contract 1.6): the
+        // first try may have reached the server, and the song must not be added twice.
+        final clave = recursoAudioId == _recursoReintento ? _claveAgregar : null;
+        try {
+            _aplicarCola(await colaService.agregar(_party.id, recursoAudioId, clave: clave));
+            _recursoReintento = null;
+            return 'Canción agregada a la cola';
+        } on ApiException catch (e) {
+            _recursoReintento = e.esDeRed ? recursoAudioId : null;
+            _claveAgregar = e.esDeRed ? e.idempotencyKey : null;
+            return switch (e.codigo) {
+                'SIN_PERMISO' => 'Ya no tienes permiso para agregar canciones a esta party',
+                'NO_ES_MIEMBRO' || 'PARTY_FINALIZADA' => 'Ya no puedes agregar canciones a esta sesión',
+                'AUDIO_NO_DISPONIBLE' => 'Esta canción no está disponible',
+                _ => 'No fue posible confirmar que la canción se agregó',
+            };
+        }
+    }
+
+    /// CU-13 y CU-14: el anfitrión da o quita permisos. Devuelve el mensaje para el anfitrión.
+    Future<String> cambiarPermisos(MiembroParty miembro, {required bool puedeAportar, required bool puedeModificarCola}) async {
+        final otorga = (puedeAportar && !miembro.puedeAportar) || (puedeModificarCola && !miembro.puedeModificarCola);
+        try {
+            await partyService.cambiarPermisos(_party.id, miembro.usuarioId, puedeAportar: puedeAportar,
+                                               puedeModificarCola: puedeModificarCola, versionEsperada: _party.version);
+            await _pedirParty();
+            return otorga ? 'Permisos otorgados correctamente' : 'Permisos retirados correctamente';
+        } on ApiException catch (e) {
+            // EX-01: whatever happened, show the permissions the server has now.
+            await _pedirParty();
+            return switch (e.codigo) {
+                'PARTICIPANTE_NO_CONECTADO' => 'El participante ya no está conectado a la party',
+                'NO_ES_ANFITRION' || 'PARTY_FINALIZADA' =>
+                    otorga ? 'No es posible otorgar permisos en esta sesión' : 'No es posible retirar permisos en esta sesión',
+                _ => 'No fue posible confirmar la asignación de permisos',
+            };
+        }
+    }
 
     Future<void> iniciar() async {
         try {
