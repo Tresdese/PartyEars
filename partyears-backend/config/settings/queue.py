@@ -10,8 +10,14 @@ from .party import JWT_CLAVE_PUBLICA, REST_FRAMEWORK
 # process has its own layer and the events never leave queue.
 from .party import CHANNEL_LAYERS
 
-INSTALLED_APPS = INSTALLED_APPS + ['apps.musicqueue']
+INSTALLED_APPS = INSTALLED_APPS + ['apps.musicqueue', 'apps.mensajeria']
 
 DATABASES = database('queue')
 
 PARTY_URL = os.environ.get('PARTY_URL', 'http://127.0.0.1:8003')
+
+SERVICIO = 'queue'
+OUTBOX_MODELO = 'musicqueue.EventoSalida'
+RABBITMQ_EXCHANGE = 'queue.eventos'
+RABBITMQ_URL = os.environ.get('QUEUE_RABBITMQ_URL', '')
+REGISTRAR_RECHAZO = 'apps.musicqueue.servicios.registrar_rechazo'

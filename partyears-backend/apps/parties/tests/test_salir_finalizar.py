@@ -8,6 +8,8 @@ from channels.routing import URLRouter
 from channels.testing import WebsocketCommunicator
 from django.test import TransactionTestCase, override_settings
 
+from apps.mensajeria.publicador import TIPO_OPERACION
+
 from apps.parties.models import (AnfitrionParty, EventoSalida, MiembroParty, ParticipacionParty, Party)
 from apps.parties.routing import websocket_urlpatterns
 from apps.parties.servicios import finalizar_party, salir_party
@@ -53,7 +55,9 @@ class PruebasSalida(PruebasBase):
         return ParticipacionParty.objects.filter(party_id=self.party_id, usuario_id=usuario_id).order_by('-entrada_en').first()
 
     def tipos_de_eventos(self):
-        eventos = EventoSalida.objects.filter(agregado_id=self.party_id).order_by('version')
+        # State events only: operation receipts for logs share the version of the last one.
+        eventos = (EventoSalida.objects.filter(agregado_id=self.party_id)
+                   .exclude(tipo=TIPO_OPERACION).order_by('version'))
         return [(e.tipo, e.version) for e in eventos]
 
     def agregar(self, esta_conectado=True, estado='habilitado'):

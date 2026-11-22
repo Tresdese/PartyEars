@@ -5,9 +5,10 @@ from rest_framework.views import APIView
 
 from apps.parties.errores import datos_invalidos
 from .cliente_party import consultar_party
-from .servicios import (agregar_elemento, cambiar_reproduccion, consultar_cola,
-                        leer_clave_idempotencia, reordenar_elemento, retirar_elemento,
-                        terminar_elemento)
+from .servicios import (OPERACION_AGREGAR, OPERACION_REORDENAR, OPERACION_REPRODUCCION,
+                        OPERACION_RETIRAR, OPERACION_TERMINADA, agregar_elemento,
+                        cambiar_reproduccion, consultar_cola, leer_clave_idempotencia,
+                        reordenar_elemento, retirar_elemento, terminar_elemento)
 
 ACCIONES = ('iniciar', 'pausar', 'reanudar', 'buscar', 'saltar')
 
@@ -49,6 +50,7 @@ class ColaView(APIView):
 
 class ElementosView(APIView):
     """POST /api/v1/queue/parties/{party_id}/cola/elementos (RF-11)."""
+    operaciones = {'POST': OPERACION_AGREGAR}
 
     def post(self, request, party_id):
         clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
@@ -62,6 +64,7 @@ class ElementosView(APIView):
 
 class ElementoView(APIView):
     """PATCH y DELETE /api/v1/queue/parties/{party_id}/cola/elementos/{elemento_id}."""
+    operaciones = {'PATCH': OPERACION_REORDENAR, 'DELETE': OPERACION_RETIRAR}
 
     def patch(self, request, party_id, elemento_id):
         clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
@@ -106,6 +109,7 @@ def validar_reproduccion(cuerpo):
 
 class ReproduccionView(APIView):
     """POST /api/v1/queue/parties/{party_id}/cola/reproduccion (RF-14, RF-15)."""
+    operaciones = {'POST': OPERACION_REPRODUCCION}
 
     def post(self, request, party_id):
         clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
@@ -118,6 +122,7 @@ class ReproduccionView(APIView):
 
 class TerminadaView(APIView):
     """POST /api/v1/queue/parties/{party_id}/cola/elementos/{elemento_id}/terminada (RF-16)."""
+    operaciones = {'POST': OPERACION_TERMINADA}
 
     def post(self, request, party_id, elemento_id):
         clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))

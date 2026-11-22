@@ -10,6 +10,8 @@ from django.utils import timezone
 from redis.exceptions import RedisError
 from .codigos import generar_codigo
 from .errores import ErrorApi
+from apps.mensajeria.publicador import TIPO_OPERACION, datos_operacion
+
 from .eventos import publicar
 from .models import (AnfitrionParty, EventoSalida, InvitacionParty, MiembroParty, OperacionConfirmada, ParticipacionParty, Party)
 
@@ -95,11 +97,7 @@ def crear_party(usuario, nombre, recurso_audio_id_inicial, clave):
 
     _emitir_invitacion(party, usuario.id, ahora)
 
-    OperacionConfirmada.objects.create(
-        actor_id=usuario.id, clave=clave, operacion=OPERACION_CREAR, solicitud_sha256=solicitud,
-        codigo_respuesta=201, resultado={'party_id': str(party.id), 'version': party.version},
-        confirmada_en=ahora,
-    )
+    _confirmar_operacion(party, usuario.id, clave, OPERACION_CREAR, solicitud, 201, ahora)
     EventoSalida.objects.create(
         agregado_id=party.id, version=party.version, tipo='party.creada', creado_en=ahora,
         datos={'party_id': str(party.id), 'nombre': party.nombre, 'anfitrion_id': str(usuario.id)},
@@ -191,11 +189,7 @@ def unirse_party(usuario, codigo, clave):
     party.version += 1
     Party.objects.filter(id=party.id).update(version=party.version)
 
-    OperacionConfirmada.objects.create(
-        actor_id=usuario.id, clave=clave, operacion=OPERACION_UNIRSE, solicitud_sha256=solicitud,
-        codigo_respuesta=200, resultado={'party_id': str(party.id), 'version': party.version},
-        confirmada_en=ahora,
-    )
+    _confirmar_operacion(party, usuario.id, clave, OPERACION_UNIRSE, solicitud, 200, ahora)
     datos = formatear_miembro(miembro, participacion, usuario.nombre_usuario)
     EventoSalida.objects.create(agregado_id=party.id, version=party.version, tipo='miembro.ingreso',
                                 creado_en=ahora, datos=datos)
@@ -338,11 +332,7 @@ def cambiar_permisos(usuario, party_id, miembro_id, puede_aportar, puede_modific
     miembro.save(update_fields=['puede_aportar', 'puede_modificar_cola'])
     party.version += 1
     party.save(update_fields=['version'])
-    OperacionConfirmada.objects.create(
-        actor_id=usuario.id, clave=clave, operacion=OPERACION_PERMISOS, solicitud_sha256=solicitud,
-        codigo_respuesta=200, resultado={'party_id': str(party.id), 'version': party.version},
-        confirmada_en=ahora,
-    )
+    _confirmar_operacion(party, usuario.id, clave, OPERACION_PERMISOS, solicitud, 200, ahora)
     datos = {'usuario_id': str(miembro.usuario_id), 'puede_aportar': puede_aportar,
              'puede_modificar_cola': puede_modificar_cola}
     EventoSalida.objects.create(agregado_id=party.id, version=party.version,
@@ -356,6 +346,28 @@ def _resultado_permisos(party, miembro):
     participacion = party.participaciones.filter(usuario_id=miembro.usuario_id,
                                                  salida_en__isnull=True).first()
     return {'miembro': formatear_miembro(miembro, participacion, None), 'version': party.version}
+
+
+def _confirmar_operacion(party, actor_id, clave, operacion, solicitud, codigo_respuesta, ahora):
+    """Recibo de idempotencia (contrato 1.6) y su copia para logs en el outbox (RF-34)."""
+    OperacionConfirmada.objects.create(
+        actor_id=actor_id, clave=clave, operacion=operacion, solicitud_sha256=solicitud,
+        codigo_respuesta=codigo_respuesta,
+        resultado={'party_id': str(party.id), 'version': party.version}, confirmada_en=ahora,
+    )
+    EventoSalida.objects.create(
+        agregado_id=party.id, version=party.version, tipo=TIPO_OPERACION, creado_en=ahora,
+        datos=datos_operacion(actor_id, party.id, operacion, codigo_respuesta, clave=clave))
+
+
+def registrar_rechazo(actor_id, party_id, operacion, error, clave):
+    """RF-34: deja en el outbox una operación rechazada, después de deshacer sus cambios."""
+    party = Party.objects.filter(id=party_id).first()
+    if party is None:
+        return
+    EventoSalida.objects.create(
+        agregado_id=party.id, version=party.version, tipo=TIPO_OPERACION,
+        datos=datos_operacion(actor_id, party.id, operacion, error.estado, error.codigo, clave))
 
 
 def _buscar_operacion_previa(usuario, clave, solicitud):
@@ -481,11 +493,7 @@ def salir_party(usuario, party_id, clave):
         if anfitrion.usuario_id == usuario.id:
             aplicar_sucesion(party, anfitrion, ahora, pendientes)
 
-    OperacionConfirmada.objects.create(
-        actor_id=usuario.id, clave=clave, operacion=OPERACION_SALIR, solicitud_sha256=solicitud,
-        codigo_respuesta=204, resultado={'party_id': str(party.id), 'version': party.version},
-        confirmada_en=ahora,
-    )
+    _confirmar_operacion(party, usuario.id, clave, OPERACION_SALIR, solicitud, 204, ahora)
     _guardar_version_y_avisar(party, pendientes)
     return None, 204
 
@@ -512,11 +520,7 @@ def finalizar_party(usuario, party_id, clave):
     pendientes = []
     _finalizar(party, 'anfitrion', ahora, pendientes)
 
-    OperacionConfirmada.objects.create(
-        actor_id=usuario.id, clave=clave, operacion=OPERACION_FINALIZAR, solicitud_sha256=solicitud,
-        codigo_respuesta=204, resultado={'party_id': str(party.id), 'version': party.version},
-        confirmada_en=ahora,
-    )
+    _confirmar_operacion(party, usuario.id, clave, OPERACION_FINALIZAR, solicitud, 204, ahora)
     _guardar_version_y_avisar(party, pendientes)
     return None, 204
 
@@ -555,11 +559,7 @@ def _administrar_miembro(usuario, party_id, miembro_id, version_esperada, clave,
     ahora = timezone.now()
     pendientes = []
     aplicar(party, miembro, ahora, pendientes)
-    OperacionConfirmada.objects.create(
-        actor_id=usuario.id, clave=clave, operacion=operacion, solicitud_sha256=solicitud,
-        codigo_respuesta=204, resultado={'party_id': str(party.id), 'version': party.version},
-        confirmada_en=ahora,
-    )
+    _confirmar_operacion(party, usuario.id, clave, operacion, solicitud, 204, ahora)
     _guardar_version_y_avisar(party, pendientes)
     return None, 204
 

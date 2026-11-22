@@ -3,7 +3,7 @@ from .base import BASE_DIR, INSTALLED_APPS, database
 from datetime import timedelta
 import os
 
-INSTALLED_APPS = ['daphne'] + INSTALLED_APPS + ['channels', 'apps.parties']
+INSTALLED_APPS = ['daphne'] + INSTALLED_APPS + ['channels', 'apps.parties', 'apps.mensajeria']
 
 ASGI_APPLICATION = 'config.asgi.application'
 
@@ -35,3 +35,10 @@ if os.environ.get('REDIS_URL'):
                                                         'socket_timeout': 15}]}}}
 else:
     CHANNEL_LAYERS = {'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}}
+
+# Events between services (DECISIONES.md): publicar_eventos sends the outbox to party.eventos.
+SERVICIO = 'party'
+OUTBOX_MODELO = 'parties.EventoSalida'
+RABBITMQ_EXCHANGE = 'party.eventos'
+RABBITMQ_URL = os.environ.get('PARTY_RABBITMQ_URL', '')
+REGISTRAR_RECHAZO = 'apps.parties.servicios.registrar_rechazo'
