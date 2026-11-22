@@ -92,9 +92,11 @@ Instala las herramientas de compilación:
 
 ```bash
 sudo apt update
-sudo apt install -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev
+sudo apt install -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev libmpv-dev
 flutter doctor -v
 ```
+
+El reproductor (`media_kit`) usa **libmpv**: `libmpv-dev` se necesita para compilar y `libmpv2` (o el paquete `mpv`) para ejecutar la app. En Windows y Android la librería viene incluida en la compilación.
 
 Compila el destino Linux **desde Linux** y el destino Windows **desde Windows**.
 
@@ -183,6 +185,16 @@ flutter run -d chrome
 ```
 
 Añadir `web/` es una decisión de proyecto que debe versionarse y coordinarse; no es un paso obligatorio de instalación.
+
+### Pruebas del reproductor
+
+Las pruebas del reproductor corren la app real con libmpv y un servidor local que imita el audio de `music` (rangos HTTP y token en la cabecera):
+
+```bash
+flutter test integration_test/reproductor_test.dart -d linux
+```
+
+En Windows, cambia `-d linux` por `-d windows`.
 
 ### Durante la ejecución
 
