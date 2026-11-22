@@ -322,9 +322,11 @@ Requiere `Idempotency-Key`. Solo el anfitrión.
 { "puede_aportar": true, "puede_modificar_cola": false, "version_esperada": 12 }
 ```
 
-`200`: el miembro actualizado y la nueva `version`. Las cuatro combinaciones son válidas. No se pueden cambiar los permisos del propio anfitrión.
+`200`: `{"miembro": <miembro, formato de 4>, "version": 13}`. Las cuatro combinaciones son válidas. Los miembros conectados reciben `miembro.permisos` (7.6). No se pueden cambiar los permisos del propio anfitrión: `400 DATOS_INVALIDOS`.
 
-Errores: `403 NO_ES_ANFITRION`, `404 NO_ENCONTRADO`, `409 VERSION_OBSOLETA`.
+El cambio aplica en la siguiente operación aunque el cliente del miembro no se haya actualizado: `queue` consulta los permisos a `party` en cada operación (5.2).
+
+Errores: `403 NO_ES_ANFITRION`, `404 NO_ENCONTRADO`, `409 VERSION_OBSOLETA`, `410 PARTY_FINALIZADA`.
 
 ### 4.5 Anfitrión y expulsión (RF-30, RF-31)
 

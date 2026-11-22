@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 OPERACION_CREAR = 'party.crear'
 OPERACION_UNIRSE = 'party.unirse'
+OPERACION_PERMISOS = 'party.permisos'
 INTENTOS_CODIGO = 10
 RECONEXION_CONSERVA_PERMISOS = timedelta(seconds=60)
 CIERRE_NO_ES_MIEMBRO = 4003
@@ -282,6 +283,65 @@ def estado_completo(party, usuario, renovar_codigo=False):
         'cola_id': None,
         'miembros': miembros,
     }
+
+
+@transaction.atomic
+def cambiar_permisos(usuario, party_id, miembro_id, puede_aportar, puede_modificar_cola,
+                     version_esperada, clave):
+    """RF-17, RF-18. Devuelve ({miembro, version}, código HTTP)."""
+    _bloquear_clave(usuario.id, clave)
+    solicitud = huella({'operacion': OPERACION_PERMISOS, 'party_id': str(party_id),
+                        'usuario_id': str(miembro_id), 'puede_aportar': puede_aportar,
+                        'puede_modificar_cola': puede_modificar_cola,
+                        'version_esperada': version_esperada})
+    party = Party.objects.select_for_update().filter(id=party_id).first()
+    if party is None:
+        raise ErrorApi(404, 'NO_ENCONTRADO', 'Esa party no existe.')
+    miembro = party.miembros.filter(usuario_id=miembro_id).first()
+
+    previa = OperacionConfirmada.objects.filter(actor_id=usuario.id, clave=clave).first()
+    if previa is not None:
+        if bytes(previa.solicitud_sha256) != solicitud:
+            raise ErrorApi(409, 'IDEMPOTENCIA_CONFLICTO',
+                           'Esa clave ya se usó con una solicitud distinta.')
+        return _resultado_permisos(party, miembro), previa.codigo_respuesta
+
+    if party.finalizada_en is not None:
+        raise ErrorApi(410, 'PARTY_FINALIZADA', 'La party ya terminó.')
+    if AnfitrionParty.objects.get(party=party).usuario_id != usuario.id:
+        raise ErrorApi(403, 'NO_ES_ANFITRION', 'Solo el anfitrión puede cambiar los permisos.')
+    if party.version != version_esperada:
+        raise ErrorApi(409, 'VERSION_OBSOLETA', 'La party cambió. Recarga para ver la actual.',
+                       {'version_actual': party.version})
+    if miembro is None:
+        raise ErrorApi(404, 'NO_ENCONTRADO', 'Esa persona no está en la party.')
+    if miembro.usuario_id == usuario.id:
+        raise ErrorApi(400, 'DATOS_INVALIDOS', 'El anfitrión siempre tiene todos los permisos.')
+
+    ahora = timezone.now()
+    miembro.puede_aportar = puede_aportar
+    miembro.puede_modificar_cola = puede_modificar_cola
+    miembro.save(update_fields=['puede_aportar', 'puede_modificar_cola'])
+    party.version += 1
+    party.save(update_fields=['version'])
+    OperacionConfirmada.objects.create(
+        actor_id=usuario.id, clave=clave, operacion=OPERACION_PERMISOS, solicitud_sha256=solicitud,
+        codigo_respuesta=200, resultado={'party_id': str(party.id), 'version': party.version},
+        confirmada_en=ahora,
+    )
+    datos = {'usuario_id': str(miembro.usuario_id), 'puede_aportar': puede_aportar,
+             'puede_modificar_cola': puede_modificar_cola}
+    EventoSalida.objects.create(agregado_id=party.id, version=party.version,
+                                tipo='miembro.permisos', datos=datos, creado_en=ahora)
+    transaction.on_commit(
+        lambda: _avisar_conectados(party.id, 'miembro.permisos', datos, party.version))
+    return _resultado_permisos(party, miembro), 200
+
+
+def _resultado_permisos(party, miembro):
+    participacion = party.participaciones.filter(usuario_id=miembro.usuario_id,
+                                                 salida_en__isnull=True).first()
+    return {'miembro': formatear_miembro(miembro, participacion, None), 'version': party.version}
 
 
 def leer_clave_idempotencia(valor):
