@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 OPERACION_CREAR = 'party.crear'
 OPERACION_UNIRSE = 'party.unirse'
 OPERACION_PERMISOS = 'party.permisos'
+OPERACION_SALIR = 'party.salir'
+OPERACION_FINALIZAR = 'party.finalizar'
 INTENTOS_CODIGO = 10
 RECONEXION_CONSERVA_PERMISOS = timedelta(seconds=60)
 CIERRE_NO_ES_MIEMBRO = 4003
@@ -241,11 +243,11 @@ def consultar_party(usuario, party_id):
     return estado_completo(party, usuario)
 
 
-def _avisar_conectados(party_id, tipo, datos, version):
+def _avisar_conectados(party_id, tipo, datos, version, evento_id=None):
     # Logging instead of failing the request: the join is already committed, and members
     # who miss the live event catch up through the snapshot (contract 7.5).
     try:
-        async_to_sync(publicar)(str(party_id), tipo, datos, version)
+        async_to_sync(publicar)(str(party_id), tipo, datos, version, evento_id=evento_id)
     except (RedisError, OSError):
         logger.exception('No se pudo avisar %s de la party %s', tipo, party_id)
 
@@ -351,6 +353,163 @@ def _resultado_permisos(party, miembro):
     participacion = party.participaciones.filter(usuario_id=miembro.usuario_id,
                                                  salida_en__isnull=True).first()
     return {'miembro': formatear_miembro(miembro, participacion, None), 'version': party.version}
+
+
+def _buscar_operacion_previa(usuario, clave, solicitud):
+    """Idempotencia (contrato 1.6): la misma clave con la misma solicitud repite el resultado."""
+    previa = OperacionConfirmada.objects.filter(actor_id=usuario.id, clave=clave).first()
+    if previa is not None and bytes(previa.solicitud_sha256) != solicitud:
+        raise ErrorApi(409, 'IDEMPOTENCIA_CONFLICTO', 'Esa clave ya se usó con una solicitud distinta.')
+    return previa
+
+
+def _registrar_evento(party, tipo, datos, ahora, pendientes):
+    """Deja el evento en el outbox con la versión siguiente de la party.
+
+    Cada evento sube la versión en uno, así el cliente detecta un evento perdido por el salto
+    (contrato 7.5). `pendientes` junta lo que se avisa por WebSocket cuando se confirme todo.
+    """
+    party.version += 1
+    evento = EventoSalida.objects.create(agregado_id=party.id, version=party.version, tipo=tipo, datos=datos, creado_en=ahora)
+    pendientes.append((evento.id, tipo, datos, party.version))
+
+
+def _guardar_version_y_avisar(party, pendientes):
+    Party.objects.filter(id=party.id).update(version=party.version)
+
+    def avisar():
+        # One callback for all events instead of one each: they must go out in order.
+        for evento_id, tipo, datos, version in pendientes:
+            _avisar_conectados(party.id, tipo, datos, version, evento_id)
+
+    transaction.on_commit(avisar)
+
+
+def conectados_habilitados(party):
+    """Participaciones abiertas de miembros habilitados: quienes sostienen la party (RF-20)."""
+    return party.participaciones.filter(
+        salida_en__isnull=True,
+        usuario_id__in=party.miembros.filter(estado='habilitado').values('usuario_id'))
+
+
+def aplicar_sucesion(party, anfitrion, ahora, pendientes):
+    """RF-22: el cargo pasa al primero por orden de ingreso entre conectados y habilitados.
+
+    Quien llama garantiza que el anfitrión actual ya no está conectado y que hay al menos un
+    candidato. T-39 reutiliza esta función desde la detección de desconexión.
+    """
+    candidato = conectados_habilitados(party).order_by('orden_ingreso').first()
+    AnfitrionParty.objects.filter(party=party).update(usuario_id=candidato.usuario_id, asignado_en=ahora)
+    _registrar_evento(party, 'anfitrion.cambio',
+                      {'anterior_id': str(anfitrion.usuario_id),
+                       'nuevo_id': str(candidato.usuario_id), 'motivo': 'sucesion'},
+                      ahora, pendientes)
+
+    # El anfitrión siempre tiene todos los permisos (4.4); el oyente que hereda el cargo no.
+    miembro = party.miembros.get(usuario_id=candidato.usuario_id)
+    if not (miembro.puede_aportar and miembro.puede_modificar_cola):
+        MiembroParty.objects.filter(id=miembro.id).update(puede_aportar=True, puede_modificar_cola=True)
+        _registrar_evento(party, 'miembro.permisos',
+                          {'usuario_id': str(candidato.usuario_id), 'puede_aportar': True,
+                           'puede_modificar_cola': True}, ahora, pendientes)
+
+
+def finalizar_sin_conectados(party, ahora, pendientes):
+    """RF-20, CU-16 FA-0.1: cierre automático. T-38 lo usa cuando la última desconexión
+    detectada deja la party vacía. Quien llama tiene la party bloqueada."""
+    if not conectados_habilitados(party).exists():
+        _finalizar(party, 'sin_conectados', ahora, pendientes)
+
+
+def _finalizar(party, motivo, ahora, pendientes):
+    # El código de invitación no se revoca: unirse comprueba finalizada_en antes y responde
+    # 410 PARTY_FINALIZADA (contrato 4.2), más claro que un 404 de código inválido.
+    party.participaciones.filter(salida_en__isnull=True).update(salida_en=ahora, motivo_salida='fin_party')
+    party.finalizada_en = ahora
+    Party.objects.filter(id=party.id).update(finalizada_en=ahora)
+    _registrar_evento(party, 'party.finalizada', {'finalizada_en': fecha_iso(ahora), 'motivo': motivo}, ahora, pendientes)
+
+
+def _party_bloqueada(party_id):
+    party = Party.objects.select_for_update().filter(id=party_id).first()
+    if party is None:
+        raise ErrorApi(404, 'NO_ENCONTRADO', 'Esa party no existe.')
+    return party
+
+
+@transaction.atomic
+def salir_party(usuario, party_id, clave):
+    """RF-19, RF-20, RF-22. Devuelve (None, 204)."""
+    _bloquear_clave(usuario.id, clave)
+    solicitud = huella({'operacion': OPERACION_SALIR, 'party_id': str(party_id)})
+    # Row lock: two members leaving at once must not both see the other as still connected,
+    # or nobody would close the party.
+    party = _party_bloqueada(party_id)
+
+    previa = _buscar_operacion_previa(usuario, clave, solicitud)
+    if previa is not None:
+        return None, previa.codigo_respuesta
+
+    if party.finalizada_en is not None:
+        raise ErrorApi(410, 'PARTY_FINALIZADA', 'La party ya terminó.')
+    participacion = party.participaciones.filter(usuario_id=usuario.id,
+                                                 salida_en__isnull=True).first()
+    if participacion is None:
+        raise ErrorApi(403, 'NO_ES_MIEMBRO', 'No estás dentro de esta party.')
+
+    ahora = timezone.now()
+    participacion.salida_en = ahora
+    participacion.motivo_salida = 'voluntaria'
+    participacion.save(update_fields=['salida_en', 'motivo_salida'])
+
+    pendientes = []
+    _registrar_evento(party, 'miembro.salida',
+                      {'usuario_id': str(usuario.id), 'motivo': 'voluntaria'}, ahora, pendientes)
+    if not conectados_habilitados(party).exists():
+        _finalizar(party, 'sin_conectados', ahora, pendientes)
+    else:
+        anfitrion = AnfitrionParty.objects.get(party=party)
+        if anfitrion.usuario_id == usuario.id:
+            aplicar_sucesion(party, anfitrion, ahora, pendientes)
+
+    OperacionConfirmada.objects.create(
+        actor_id=usuario.id, clave=clave, operacion=OPERACION_SALIR, solicitud_sha256=solicitud,
+        codigo_respuesta=204, resultado={'party_id': str(party.id), 'version': party.version},
+        confirmada_en=ahora,
+    )
+    _guardar_version_y_avisar(party, pendientes)
+    return None, 204
+
+
+@transaction.atomic
+def finalizar_party(usuario, party_id, clave):
+    """RF-18, RF-20. Devuelve (None, 204)."""
+    _bloquear_clave(usuario.id, clave)
+    solicitud = huella({'operacion': OPERACION_FINALIZAR, 'party_id': str(party_id)})
+    party = _party_bloqueada(party_id)
+
+    previa = _buscar_operacion_previa(usuario, clave, solicitud)
+    if previa is not None:
+        return None, previa.codigo_respuesta
+
+    if party.finalizada_en is not None:
+        raise ErrorApi(410, 'PARTY_FINALIZADA', 'La party ya terminó.')
+    if not _esta_dentro(party, usuario.id):
+        raise ErrorApi(403, 'NO_ES_MIEMBRO', 'No estás dentro de esta party.')
+    if AnfitrionParty.objects.get(party=party).usuario_id != usuario.id:
+        raise ErrorApi(403, 'NO_ES_ANFITRION', 'Solo el anfitrión puede finalizar la party.')
+
+    ahora = timezone.now()
+    pendientes = []
+    _finalizar(party, 'anfitrion', ahora, pendientes)
+
+    OperacionConfirmada.objects.create(
+        actor_id=usuario.id, clave=clave, operacion=OPERACION_FINALIZAR, solicitud_sha256=solicitud,
+        codigo_respuesta=204, resultado={'party_id': str(party.id), 'version': party.version},
+        confirmada_en=ahora,
+    )
+    _guardar_version_y_avisar(party, pendientes)
+    return None, 204
 
 
 def leer_clave_idempotencia(valor):
