@@ -268,7 +268,7 @@ Estado completo de una party, usado en varias respuestas:
 - `orden_ingreso` define la sucesión (RF-22).
 - `codigo` solo se incluye si quien consulta es el anfitrión; los demás reciben `null`.
 
-### 4.1 Crear, salir y finalizar (Mariana)
+### 4.1 Crear, salir y finalizar
 
 #### 4.1.1 `POST /api/v1/party/parties` (RF-06, RF-07)
 
@@ -290,7 +290,9 @@ La party activa del usuario autenticado, o `204` si no está en ninguna. Lo usa 
 
 #### 4.1.3 `POST /api/v1/party/parties/{party_id}/salir` (RF-19, RF-22)
 
-Requiere `Idempotency-Key`. `204`. Si sale el anfitrión y hay candidatos, el servidor aplica la sucesión; si no queda nadie conectado, finaliza la party (RF-20).
+Requiere `Idempotency-Key`. `204`. Cierra la participación del usuario (`motivo_salida` `voluntaria`) y lo avisa como `miembro.salida`. Si sale el anfitrión y hay candidatos, el servidor aplica la sucesión (RF-22): el cargo pasa al primero por `orden_ingreso` entre conectados y habilitados, que recibe ambos permisos, y se publican `anfitrion.cambio` (`sucesion`) y, si sus permisos cambiaron, `miembro.permisos`. Si no queda nadie conectado y habilitado, finaliza la party (RF-20) con `party.finalizada` (`sin_conectados`). Quien vuelve a unirse entra como oyente con un `orden_ingreso` nuevo; el anfitrión anterior no recupera el cargo.
+
+El servidor cierra los WebSocket del usuario que salió con `4003` justo después de enviarle su `miembro.salida`.
 
 #### 4.1.4 `POST /api/v1/party/parties/{party_id}/finalizar` (RF-20)
 
