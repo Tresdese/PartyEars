@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../core/network/red.dart';
 import '../core/theme/app_theme.dart';
 import '../features/auth/presentation/login_screen.dart';
+import 'navigation/main_shell.dart';
 
 class PartyEarsApp extends StatelessWidget {
   const PartyEarsApp({super.key});
@@ -12,7 +14,15 @@ class PartyEarsApp extends StatelessWidget {
       title: 'PartyEars',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark,
-      home: const LoginScreen(),
+      // Straight in when tokens are saved: Android may kill the app in the middle of a party.
+      home: FutureBuilder<bool>(
+        future: Red.instancia.api.haySesion(),
+        builder: (context, sesion) => switch (sesion.data) {
+          null => const Scaffold(),
+          true => const MainShell(),
+          false => const LoginScreen(),
+        },
+      ),
     );
   }
 }

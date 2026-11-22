@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/demo_data.dart';
@@ -31,15 +33,38 @@ class _MainShellState extends State<MainShell> {
 
     late final PartyService _partyService = PartyService.fabrica();
 
+    StreamSubscription<void>? _expirada;
+
     @override
     void initState() {
         super.initState();
+        // Back to login instead of failing every call: the saved refresh token stopped working.
+        _expirada = Red.instancia.api.sesionExpirada.listen((_) {
+            if (mounted) unawaited(_logout());
+        });
         _restaurarParty();
+    }
+
+    @override
+    void dispose() {
+        _expirada?.cancel();
+        super.dispose();
     }
 
     Future<void> _restaurarParty() async {
         try {
-            final party = await _partyService.actual();
+            var party = await _partyService.actual();
+            // The server already closed the participation (app killed for more than 15 s):
+            // come back with the saved code, as after any detected disconnection.
+            final codigo = party == null ? await PartyService.codigoRecordado() : null;
+            if (codigo != null) {
+                try {
+                    party = await _partyService.unirse(codigo);
+                } on ApiException catch (e) {
+                    // Expelled, ended or full: the saved code no longer leads anywhere.
+                    if (!e.esDeRed) await PartyService.olvidar();
+                }
+            }
 
             if (!mounted || party == null) return;
 
@@ -67,6 +92,7 @@ class _MainShellState extends State<MainShell> {
 
     // CU-15 step 6 and CU-16 step 8: back to the main screen, with the message if there is one.
     void _salirDeParty(String? mensaje) {
+        unawaited(PartyService.olvidar());
         setState(() {
             _party = null;
             _selectedIndex = 0;
@@ -86,6 +112,7 @@ class _MainShellState extends State<MainShell> {
     // CU-03: revoking on the server instead of only changing screens, or the refresh token
     // would stay valid for 7 days on this device.
     Future<void> _logout() async {
+        await PartyService.olvidar();
         await Red.instancia.api.cerrarSesion();
         if (!mounted) return;
         Navigator.of(context).pushAndRemoveUntil(

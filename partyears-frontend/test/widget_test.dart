@@ -22,6 +22,7 @@ void _useDesktopSize(WidgetTester tester) {
 // The demo user of MockApiClient (simulado.dart).
 Future<void> _login(WidgetTester tester) async {
     await tester.pumpWidget(const PartyEarsApp());
+            await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).at(0), 'demo@partyears.mx');
     await tester.enterText(find.byType(TextField).at(1), 'demopassword1');
     await tester.tap(find.text('Entrar a PartyEars'));
@@ -71,8 +72,14 @@ void main() {
     });
 
     group('Pruebas de PartyEars', () {
+        setUp(() async {
+            await Red.instancia.api.cerrarSesion();
+            await PartyService.olvidar();
+        });
+
         testWidgets('Con contraseña incorrecta no entra y muestra el error', (tester) async {
             await tester.pumpWidget(const PartyEarsApp());
+            await tester.pumpAndSettle();
             await tester.enterText(find.byType(TextField).at(0), 'demo@partyears.mx');
             await tester.enterText(find.byType(TextField).at(1), 'otra-contrasena');
             await tester.tap(find.text('Entrar a PartyEars'));
@@ -86,6 +93,7 @@ void main() {
         testWidgets('El registro marca en su campo lo que el servidor rechaza', (tester) async {
             _useDesktopSize(tester);
             await tester.pumpWidget(const PartyEarsApp());
+            await tester.pumpAndSettle();
             await tester.tap(find.text('Crear una cuenta'));
             await tester.pumpAndSettle();
             final campos = find.byType(TextField);
@@ -104,6 +112,7 @@ void main() {
             (WidgetTester tester,) async {
                 _useDesktopSize(tester);
                 await tester.pumpWidget(const PartyEarsApp());
+            await tester.pumpAndSettle();
                 expect(find.text('Inicia sesión'), findsOneWidget);
                 expect(find.text('Correo electrónico'), findsOneWidget);
                 expect(find.text('Contraseña'), findsOneWidget);
@@ -119,6 +128,7 @@ void main() {
                 for (final size in const [Size(800, 600), Size(720, 400)]) {
                     tester.view.physicalSize = size;
                     await tester.pumpWidget(const PartyEarsApp());
+            await tester.pumpAndSettle();
                     await tester.pump();
                     expect(tester.takeException(), isNull, reason: '$size');
                 }

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:partyears_frontend/core/network/api_client.dart';
 import 'package:partyears_frontend/core/network/api_config.dart';
 import 'package:partyears_frontend/core/network/api_exception.dart';
@@ -19,6 +20,19 @@ Future<PartyService> _servicioConSesion() async {
 }
 
 void main() {
+    test('recuerda en disco el código de la party activa y lo olvida al salir', () async {
+        TestWidgetsFlutterBinding.ensureInitialized();
+        SharedPreferences.setMockInitialValues({});
+
+        await PartyService.recordar('p1', 'K7Q2ZP');
+        expect(await PartyService.codigoRecordado(), 'K7Q2ZP');
+        expect(PartyService.codigosDeIngreso['p1'], 'K7Q2ZP');
+
+        await PartyService.olvidar();
+        expect(await PartyService.codigoRecordado(), isNull);
+        expect(PartyService.codigosDeIngreso, isEmpty);
+    });
+
     test('sin party activa, actual() devuelve null', () async {
         final servicio = await _servicioConSesion();
         expect(await servicio.actual(), isNull);
