@@ -14,6 +14,7 @@ import 'data/cola_models.dart';
 import 'data/cola_service.dart';
 import 'data/party_models.dart';
 import 'data/party_service.dart';
+import 'segundo_plano.dart';
 import 'sincronizacion.dart';
 
 /// Lo que la pantalla de party necesita mientras se está dentro (T-55): la party, la cola,
@@ -185,6 +186,7 @@ class SesionParty extends ChangeNotifier {
             ..add(ws.cierres.listen((motivo) => _cambiar(() => cierre = motivo)))
             ..add(reproductor.errores.listen((m) => _cambiar(() => errorAudio = m)))
             ..add(reproductor.terminado.listen((_) => unawaited(_alTerminar())));
+        await SegundoPlano.mantener(_party.nombre);
         await ws.conectar();
         _timerReloj = Timer.periodic(_periodoReloj, (_) => _medirReloj(_pingsPeriodicos));
     }
@@ -319,6 +321,7 @@ class SesionParty extends ChangeNotifier {
         }
         await reproductor.cerrar();
         await ws.cerrar();
+        await SegundoPlano.soltar();
     }
 
     @override
