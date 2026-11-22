@@ -419,7 +419,7 @@ class SalidasSimultaneasTests(TransactionTestCase):
         self.assertEqual(EventoSalida.objects.filter(tipo='party.finalizada').count(), 1)
 
 
-class WebSocketSalidaTests(IsolatedAsyncioTestCase):
+class PruebasWebSocketParty(IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         ajustes = override_settings(
@@ -458,6 +458,9 @@ class WebSocketSalidaTests(IsolatedAsyncioTestCase):
         salida = await cliente.receive_output(timeout=1)
         self.assertEqual(salida['type'], 'websocket.close', f'se esperaba un cierre: {salida}')
         return salida.get('code')
+
+
+class WebSocketSalidaTests(PruebasWebSocketParty):
 
     async def test_al_finalizar_todos_reciben_el_aviso_y_el_servidor_cierra_con_4010(self):
         _, oyente = await self.conectar_miembro()

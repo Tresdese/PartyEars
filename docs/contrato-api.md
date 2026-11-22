@@ -346,6 +346,9 @@ Todas requieren `Idempotency-Key`, solo las ejecuta el anfitrión y devuelven `2
 
 - Transferir: el destinatario debe estar conectado y habilitado; si no, `409 DESTINATARIO_NO_ELEGIBLE`.
 - Expulsar cierra su participación y su voz e impide que vuelva a entrar. Rehabilitar le permite entrar otra vez como oyente, sin conectarlo.
+- Expulsar publica `miembro.expulsado` y, si estaba conectado, `miembro.salida` (`expulsion`), en ese orden. El servidor cierra el WebSocket del expulsado con `4003` justo después de enviarle su `miembro.expulsado`. Sus permisos quedan en `false`. Si era el último conectado, la party finaliza (`sin_conectados`).
+- Rehabilitar publica `miembro.rehabilitado`. Expulsar a quien ya está expulsado, o rehabilitar a quien ya está habilitado, responde `204` sin cambiar la versión.
+- Errores de expulsar y rehabilitar: `400 DATOS_INVALIDOS` (falta `version_esperada` o el anfitrión se elige a sí mismo), `403 NO_ES_ANFITRION`, `404 NO_ENCONTRADO`, `409 VERSION_OBSOLETA`, `410 PARTY_FINALIZADA`.
 
 ### 4.6 Chat (Mariana, RF-26)
 
