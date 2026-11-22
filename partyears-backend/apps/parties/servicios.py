@@ -443,8 +443,7 @@ def _asignar_anfitrion(party, anterior_id, miembro, motivo, ahora, pendientes):
 
 
 def finalizar_sin_conectados(party, ahora, pendientes):
-    """RF-20, CU-16 FA-0.1: cierre automático. T-38 lo usa cuando la última desconexión
-    detectada deja la party vacía. Quien llama tiene la party bloqueada."""
+    """RF-20, CU-16 FA-0.1: cierre automático. Quien llama tiene la party bloqueada."""
     if not conectados_habilitados(party).exists():
         _finalizar(party, 'sin_conectados', ahora, pendientes)
 
@@ -518,7 +517,8 @@ def desconectar_participante(party_id, usuario_id):
     party = Party.objects.select_for_update().filter(id=party_id).first()
     if party is None or party.finalizada_en is not None:
         return False
-    participacion = party.participaciones.filter(usuario_id=usuario_id, salida_en__isnull=True).first()
+    participacion = party.participaciones.filter(usuario_id=usuario_id,
+                                                 salida_en__isnull=True).first()
     if participacion is None:
         return False
 
@@ -528,10 +528,14 @@ def desconectar_participante(party_id, usuario_id):
     participacion.save(update_fields=['salida_en', 'motivo_salida'])
 
     pendientes = []
-    _registrar_evento(party, 'miembro.desconectado', {'usuario_id': str(usuario_id)}, ahora, pendientes)
-    # TODO(T-39): si era el anfitrión y quedan candidatos, aplicar_sucesion(party, anfitrion,
-    # ahora, pendientes) va aquí, antes de finalizar_sin_conectados.
-    finalizar_sin_conectados(party, ahora, pendientes)
+    _registrar_evento(party, 'miembro.desconectado', {'usuario_id': str(usuario_id)}, ahora,
+                      pendientes)
+    if not conectados_habilitados(party).exists():
+        _finalizar(party, 'sin_conectados', ahora, pendientes)
+    else:
+        anfitrion = AnfitrionParty.objects.get(party=party)
+        if str(anfitrion.usuario_id) == str(usuario_id):
+            aplicar_sucesion(party, anfitrion, ahora, pendientes)
     _guardar_version_y_avisar(party, pendientes)
     return True
 

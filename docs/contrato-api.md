@@ -310,7 +310,7 @@ Requiere `Idempotency-Key`.
 { "codigo": "K7Q2ZP" }
 ```
 
-`200`: estado completo de la party. Entra como oyente (sin permisos), salvo reconexión dentro de los 60 s, que conserva los permisos vigentes (RF-21). En ese caso los miembros reciben miembro.reconectado en lugar de miembro.ingreso."
+`200`: estado completo de la party. Entra como oyente (sin permisos), salvo reconexión dentro de los 60 s, que conserva los permisos vigentes (RF-21). En ese caso los miembros reciben `miembro.reconectado` en lugar de `miembro.ingreso`.
 
 Errores: `404 CODIGO_INVALIDO`, `410 CODIGO_EXPIRADO`, `410 PARTY_FINALIZADA`, `403 USUARIO_EXPULSADO`, `409 PARTY_LLENA`, `409 YA_EN_OTRA_PARTY`.
 
@@ -605,7 +605,7 @@ Todos los mensajes, en ambas direcciones:
 Solo en el WebSocket de `party`, que es el que define la presencia:
 
 - El cliente manda `{"tipo": "latido"}` cada **5 s**. El servidor responde `{"tipo": "latido.ok"}`. Va sin el sobre de 7.3: no cambia estado ni se repite. Sin autenticar, cierre `4001`.
-- El servidor detecta la desconexión cuando pasan **15 s** sin un mensaje válido suyo, o de inmediato si su socket se cierra. Cierra su participación con motivo `desconexion`, cierra el socket con `4009` si seguía abierto y avisa a los demás con `miembro.desconectado`. Si la persona tiene otro socket abierto en la misma party, no se marca desconectada.
+- El servidor detecta la desconexión cuando pasan **15 s** sin un mensaje válido suyo, contados desde su último mensaje aunque su socket ya se haya cerrado: si en ese tiempo vuelve a autenticarse por otro socket, no pasa nada (renovar el token o un corte breve no lo sacan). Cierra su participación con motivo `desconexion`, cierra el socket con `4009` si seguía abierto y avisa a los demás con `miembro.desconectado`. Si la persona tiene otro socket abierto en la misma party, no se marca desconectada. Si era el anfitrión, se aplica la sucesión igual que al salir (4.1, RF-22); si no queda nadie conectado y habilitado, la party finaliza.
 - El cliente se considera desconectado tras **15 s** sin recibir nada del servidor: lo muestra, deshabilita las modificaciones y reintenta conectar.
 - La pertenencia y los permisos se conservan **60 s** desde que el servidor detecta la desconexión. Para volver, el cliente llama a `POST .../unirse` (4.2) y después conecta el WebSocket. Si lo hace dentro de los 60 s conserva sus permisos y los demás reciben `miembro.reconectado`; si no, entra como oyente y reciben `miembro.ingreso`.
 
@@ -687,4 +687,3 @@ En `voz.senal` el cliente manda `para`; el servidor agrega `de` y solo lo reenv�
 | Límite de desfase y corrección | 5.3 | Darlington |
 | Topología de voz y TURN | 6 | Mariana |
 | WebSocket por servicio o único | 7.1 | Los tres |
-| Sucesión del anfitrión al detectar su desconexión | 7.4 | Darlington (T-39) |

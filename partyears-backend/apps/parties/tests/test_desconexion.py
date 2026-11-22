@@ -7,7 +7,8 @@ from django.test import override_settings
 from django.utils import timezone
 from types import SimpleNamespace
 
-from apps.parties.models import EventoSalida, InvitacionParty, MiembroParty, ParticipacionParty, Party
+from apps.parties.models import (AnfitrionParty, EventoSalida, InvitacionParty, MiembroParty,
+                                 ParticipacionParty, Party)
 from apps.parties.servicios import desconectar_participante, unirse_party
 
 from .utilidades import agregar_miembro, crear_party_en_bd, vaciar_tablas_party
@@ -101,12 +102,17 @@ class DesconectarParticipanteTests(IsolatedAsyncioTestCase):
         self.assertEqual(await self.leer(), antes)
         self.assertEqual(antes['participaciones'][self.miembro_id][1], 'voluntaria')
 
-    async def test_si_se_desconecta_el_anfitrion_y_queda_alguien_la_party_sigue(self):
+    async def test_si_se_desconecta_el_anfitrion_el_cargo_pasa_al_siguiente(self):
+        """RF-22, T-39: la sucesión también aplica cuando el servidor detecta la desconexión."""
         self.assertTrue(await self.desconectar(self.anfitrion_id))
 
         estado = await self.leer()
         self.assertIsNone(estado['finalizada_en'])
         self.assertEqual([tipo for tipo, _ in estado['eventos']], ['miembro.desconectado'])
+        anfitrion = await database_sync_to_async(
+            lambda: AnfitrionParty.objects.get(party_id=self.party_id).usuario_id)()
+        self.assertEqual(anfitrion, self.miembro_id)
+        self.assertEqual(estado['permisos'][self.miembro_id], (True, True))
 
     async def test_la_ultima_desconexion_finaliza_la_party(self):
         await self.desconectar(self.miembro_id)

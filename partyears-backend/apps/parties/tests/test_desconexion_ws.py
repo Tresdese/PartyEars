@@ -16,7 +16,8 @@ from .utilidades import CLAVE_PUBLICA, agregar_miembro, crear_party_en_bd, vacia
 
 
 def participacion(party_id, usuario_id):
-    abierta = (ParticipacionParty.objects.filter(party_id=party_id, usuario_id=usuario_id).order_by('-entrada_en').first())
+    abierta = (ParticipacionParty.objects.filter(party_id=party_id, usuario_id=usuario_id)
+               .order_by('-entrada_en').first())
     return abierta.salida_en, abierta.motivo_salida
 
 
@@ -117,7 +118,7 @@ class DeteccionDesconexionTests(IsolatedAsyncioTestCase):
             self.party_id, self.anfitrion_id)
         self.assertIsNone(salida_en)
 
-    async def test_cerrar_el_socket_marca_desconectado_sin_esperar_el_silencio(self):
+    async def test_cerrar_el_socket_marca_desconectado_cuando_se_cumple_el_silencio(self):
         host = await self.conectar(self.anfitrion_id)
         self.mantener_vivo(host)
         otro_id = await self.nuevo_miembro()
@@ -126,6 +127,7 @@ class DeteccionDesconexionTests(IsolatedAsyncioTestCase):
         await otro.disconnect()
         self.abiertos.remove(otro)
 
+        self.assertFalse(await self.llega_evento(host, 'miembro.desconectado', 0.2))
         aviso = await self.esperar_evento(host, 'miembro.desconectado')
         self.assertEqual(aviso['datos'], {'usuario_id': str(otro_id)})
         _, motivo = await database_sync_to_async(participacion)(self.party_id, otro_id)
@@ -143,5 +145,21 @@ class DeteccionDesconexionTests(IsolatedAsyncioTestCase):
         self.abiertos.remove(primero)
 
         self.assertFalse(await self.llega_evento(host, 'miembro.desconectado', 0.4))
+        salida_en, _ = await database_sync_to_async(participacion)(self.party_id, usuario_id)
+        self.assertIsNone(salida_en)
+
+    async def test_reconectar_antes_del_silencio_conserva_la_participacion(self):
+        """Renewing the token (4001) or a network blip must not kick the person out."""
+        host = await self.conectar(self.anfitrion_id)
+        self.mantener_vivo(host)
+        usuario_id = await self.nuevo_miembro()
+        viejo = await self.conectar(usuario_id)
+
+        await viejo.disconnect()
+        self.abiertos.remove(viejo)
+        nuevo = await self.conectar(usuario_id)
+        self.mantener_vivo(nuevo)
+
+        self.assertFalse(await self.llega_evento(host, 'miembro.desconectado', 0.8))
         salida_en, _ = await database_sync_to_async(participacion)(self.party_id, usuario_id)
         self.assertIsNone(salida_en)
