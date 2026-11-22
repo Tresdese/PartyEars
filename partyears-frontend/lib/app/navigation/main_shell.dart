@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/demo_data.dart';
 import '../../core/network/api_exception.dart';
+import '../../core/network/red.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
 import '../../features/auth/presentation/login_screen.dart';
@@ -82,7 +83,11 @@ class _MainShellState extends State<MainShell> {
 
     void _go(int index) => setState(() => _selectedIndex = index);
 
-    void _logout() {
+    // CU-03: revoking on the server instead of only changing screens, or the refresh token
+    // would stay valid for 7 days on this device.
+    Future<void> _logout() async {
+        await Red.instancia.api.cerrarSesion();
+        if (!mounted) return;
         Navigator.of(context).pushAndRemoveUntil(
             MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
             (_) => false,

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:partyears_frontend/app/party_ears_app.dart';
 import 'package:partyears_frontend/core/demo_data.dart';
 import 'package:partyears_frontend/core/network/api_exception.dart';
+import 'package:partyears_frontend/core/network/red.dart';
 import 'package:partyears_frontend/features/party/data/party_models.dart';
 import 'package:partyears_frontend/features/party/data/party_service.dart';
 import 'package:partyears_frontend/features/party/presentation/party_screen.dart';
@@ -17,9 +19,15 @@ void _useDesktopSize(WidgetTester tester) {
     addTearDown(tester.view.reset);
 }
 
+// The demo user of MockApiClient (simulado.dart).
 Future<void> _login(WidgetTester tester) async {
     await tester.pumpWidget(const PartyEarsApp());
+    await tester.enterText(find.byType(TextField).at(0), 'demo@partyears.mx');
+    await tester.enterText(find.byType(TextField).at(1), 'demopassword1');
     await tester.tap(find.text('Entrar a PartyEars'));
+    // pump with a duration first: MockApiClient answers after a timer, which pumpAndSettle
+    // alone does not wait for.
+    await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
 }
 
@@ -55,12 +63,43 @@ class _PartyFalso implements PartyService {
 }
 
 void main() {
-    setUpAll(() {
+    setUpAll(() async {
+        SharedPreferences.setMockInitialValues({});
+        await Red.iniciar();
         PartyService.fabrica = () => _PartyFalso();
         SesionParty.fabrica = sesionFalsa;
     });
 
     group('Pruebas de PartyEars', () {
+        testWidgets('Con contraseña incorrecta no entra y muestra el error', (tester) async {
+            await tester.pumpWidget(const PartyEarsApp());
+            await tester.enterText(find.byType(TextField).at(0), 'demo@partyears.mx');
+            await tester.enterText(find.byType(TextField).at(1), 'otra-contrasena');
+            await tester.tap(find.text('Entrar a PartyEars'));
+            await tester.pump(const Duration(seconds: 1));
+            await tester.pump();
+
+            expect(find.text('Correo o contraseña incorrectos.'), findsOneWidget);
+            expect(find.text('Inicia sesión'), findsOneWidget);
+        });
+
+        testWidgets('El registro marca en su campo lo que el servidor rechaza', (tester) async {
+            _useDesktopSize(tester);
+            await tester.pumpWidget(const PartyEarsApp());
+            await tester.tap(find.text('Crear una cuenta'));
+            await tester.pumpAndSettle();
+            final campos = find.byType(TextField);
+            await tester.enterText(campos.at(0), 'nuevo');
+            await tester.enterText(campos.at(1), 'nuevo@partyears.mx');
+            await tester.enterText(campos.at(2), 'corta');
+            await tester.enterText(campos.at(3), 'corta');
+            await tester.tap(find.text('Registrarse'));
+            await tester.pump(const Duration(seconds: 1));
+            await tester.pump();
+
+            expect(find.text('Debe tener al menos 10 caracteres.'), findsOneWidget);
+        });
+
         testWidgets('Muestra la pantalla de inicio de sesión', 
             (WidgetTester tester,) async {
                 _useDesktopSize(tester);
