@@ -51,7 +51,11 @@ SECRET_KEY = 'django-insecure-sh=wos8z2mwc1ivff@^@$e*p=_!!i^t5r$7$tu(2ymu^pyj=s2
 
 DEBUG = True
 
-ALLOWED_HOSTS = []
+# From .env instead of a fixed list: each PC and the server are reached by a different IP.
+# localhost always instead of only when the list is empty: Django drops it once any host is set.
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '[::1]'] + [
+    h.strip() for h in os.environ.get('ALLOWED_HOSTS', '').split(',') if h.strip()
+]
 
 
 # No admin or sessions here: only the auth service uses them (see auth.py).

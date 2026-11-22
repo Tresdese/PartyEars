@@ -8,7 +8,7 @@ Antes de ejecutar el backend es necesario tener instalado:
 
 * Python
 * Git
-* PowerShell
+* Bash (Linux) o PowerShell (Windows)
 * PostgreSQL o acceso a la base de datos PostgreSQL utilizada por el proyecto
 
 ## 1. Clonar el repositorio
@@ -29,36 +29,28 @@ Después entrar al backend:
 cd partyears-backend
 ```
 
-## 2. Ejecutar el backend
+## 2. Ejecutar un servicio con el script
 
-Desde la raíz de `partyears-backend`, ejecutar:
+Antes, configura `.env` (sección 5). Desde `partyears-backend`, indica el servicio:
 
-```powershell
-.\partyearsBackend
+```bash
+./partyearsBackend.sh party
 ```
 
-El script se encarga de utilizar el entorno virtual correspondiente al backend.
-
-Después de activarse correctamente, la terminal debería indicar que se está utilizando el entorno virtual de PartyEars.
-
-Por ejemplo:
-
-```text
-(PartyEars) PS C:\...\PartyEars\partyears-backend>
+```powershell
+.\partyearsBackend.ps1 party
 ```
 
-## 3. Instalar dependencias
+El script crea el entorno virtual si no existe (`venv` en Linux, `.venv` en Windows, para que no choquen si el disco es compartido), instala `requirements.txt` y levanta el servicio en `0.0.0.0` con su puerto de la sección 4. Para que un celular u otra PC lleguen por la red, agrega tu IP a `ALLOWED_HOSTS` en `.env`; en Windows, permite Python en el firewall cuando lo pregunte.
 
-Si es la primera vez que se ejecuta el proyecto y las dependencias todavía no están instaladas:
+No aplica migraciones: la base de desarrollo es compartida, así que se migra a mano (sección 6).
 
-```powershell
+## 3. Instalar dependencias sin el script
+
+Con el entorno virtual activado:
+
+```bash
 pip install -r requirements.txt
-```
-
-Las dependencias necesarias para el backend se encuentran registradas en:
-
-```text
-requirements.txt
 ```
 
 ## 4. Servicios y bases de datos
