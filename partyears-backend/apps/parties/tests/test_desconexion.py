@@ -2,15 +2,17 @@ import uuid
 from unittest import IsolatedAsyncioTestCase
 
 from channels.db import database_sync_to_async
+from datetime import timedelta
 from django.test import override_settings
 from django.utils import timezone
+from types import SimpleNamespace
 
-from apps.parties.models import EventoSalida, ParticipacionParty, Party
-from apps.parties.servicios import desconectar_participante
+from apps.parties.models import EventoSalida, InvitacionParty, MiembroParty, ParticipacionParty, Party
+from apps.parties.servicios import desconectar_participante, unirse_party
 
 from .utilidades import agregar_miembro, crear_party_en_bd, vaciar_tablas_party
 
-TIPOS = ('miembro.desconectado', 'party.finalizada')
+TIPOS = ('miembro.desconectado', 'miembro.reconectado', 'miembro.ingreso', 'party.finalizada')
 
 
 def leer_estado(party_id):
@@ -21,7 +23,25 @@ def leer_estado(party_id):
         'participaciones': {p.usuario_id: (p.salida_en, p.motivo_salida) for p in party.participaciones.all()},
         'miembros': {m.usuario_id: m.estado for m in party.miembros.all()},
         'eventos': [(e.tipo, e.datos) for e in EventoSalida.objects.filter(agregado_id=party_id, tipo__in=TIPOS).order_by('version')],
+        'permisos': {m.usuario_id: (m.puede_aportar, m.puede_modificar_cola) for m in party.miembros.all()},
     }
+
+
+def preparar_reingreso(party_id, usuario_id, anfitrion_id):
+    MiembroParty.objects.filter(party_id=party_id, usuario_id=usuario_id).update(puede_aportar=True, puede_modificar_cola=True)
+    InvitacionParty.objects.create(party_id=party_id, codigo='ABC123', creada_por=anfitrion_id, expira_en=timezone.now() + timedelta(hours=1))
+
+
+def envejecer_desconexion(party_id, usuario_id, segundos):
+    ahora = timezone.now()
+    ParticipacionParty.objects.filter(party_id=party_id, usuario_id=usuario_id).update(
+        entrada_en=ahora - timedelta(seconds=segundos + 60),
+        salida_en=ahora - timedelta(seconds=segundos))
+
+
+def reingresar(party_id, usuario_id):
+    usuario = SimpleNamespace(id=usuario_id, nombre_usuario='miembro')
+    return unirse_party(usuario, 'ABC123', uuid.uuid4())
 
 
 class DesconectarParticipanteTests(IsolatedAsyncioTestCase):
@@ -103,3 +123,28 @@ class DesconectarParticipanteTests(IsolatedAsyncioTestCase):
         await database_sync_to_async(Party.objects.filter(id=self.party_id).update)(finalizada_en=timezone.now())
         self.assertFalse(await self.desconectar(self.miembro_id))
         self.assertEqual((await self.leer())['eventos'], [])
+
+    async def test_volver_antes_de_60_segundos_conserva_permisos_y_avisa_reconectado(self):
+        await database_sync_to_async(preparar_reingreso)(self.party_id, self.miembro_id, self.anfitrion_id)
+        await self.desconectar(self.miembro_id)
+
+        estado_http, codigo = await database_sync_to_async(reingresar)(self.party_id, self.miembro_id)
+
+        self.assertEqual(codigo, 200)
+        miembro = next(m for m in estado_http['miembros'] if m['usuario_id'] == str(self.miembro_id))
+        self.assertTrue(miembro['conectado'])
+        estado = await self.leer()
+        self.assertEqual(estado['permisos'][self.miembro_id], (True, True))
+        self.assertEqual([tipo for tipo, _ in estado['eventos']], ['miembro.desconectado', 'miembro.reconectado'])
+        self.assertEqual(estado['eventos'][-1][1], {'usuario_id': str(self.miembro_id)})
+
+    async def test_volver_despues_de_60_segundos_reinicia_permisos_y_entra_como_oyente(self):
+        await database_sync_to_async(preparar_reingreso)(self.party_id, self.miembro_id, self.anfitrion_id)
+        await self.desconectar(self.miembro_id)
+        await database_sync_to_async(envejecer_desconexion)(self.party_id, self.miembro_id, 61)
+
+        await database_sync_to_async(reingresar)(self.party_id, self.miembro_id)
+
+        estado = await self.leer()
+        self.assertEqual(estado['permisos'][self.miembro_id], (False, False))
+        self.assertEqual([tipo for tipo, _ in estado['eventos']], ['miembro.desconectado', 'miembro.ingreso'])
