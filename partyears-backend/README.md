@@ -97,6 +97,25 @@ python manage.py runserver 8001
 
 El panel administrativo solo existe en el servicio auth: `http://127.0.0.1:8001/admin/`.
 
+## 6.1 Eventos entre servicios y registro técnico (RabbitMQ, T-21)
+
+Además del servidor web, party y queue corren un proceso que manda su outbox a RabbitMQ, y logs corre uno que lo guarda en `logs.evento_log`. Cada uno necesita su `<SERVICIO>_RABBITMQ_URL` en `.env` (ver `.env.example`). RabbitMQ solo escucha en `127.0.0.1` del servidor: desde otra PC hace falta el túnel SSH.
+
+```bash
+DJANGO_SETTINGS_MODULE=config.settings.party python manage.py publicar_eventos
+DJANGO_SETTINGS_MODULE=config.settings.queue python manage.py publicar_eventos
+DJANGO_SETTINGS_MODULE=config.settings.logs python manage.py consumir_eventos
+```
+
+Si alguno está apagado no se pierde nada: los eventos esperan en el outbox o en la cola de RabbitMQ.
+
+Para consultar los registros (CU-27), por party, por usuario o por la `Idempotency-Key` de una operación:
+
+```bash
+DJANGO_SETTINGS_MODULE=config.settings.logs python manage.py ver_registros --party <uuid>
+DJANGO_SETTINGS_MODULE=config.settings.logs python manage.py ver_registros --actor <uuid> --desde 2026-11-25T10:00:00-06:00
+```
+
 ## 7. Conectarse a una base desde la terminal
 
 ```bash

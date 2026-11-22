@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+from apps.mensajeria.publicador import TIPO_OPERACION
 from apps.musicqueue.models import EventoSalida
 from .utilidades import PruebasCola
 
@@ -25,7 +26,8 @@ class EventosEnVivoTests(PruebasCola):
     def test_el_evento_en_vivo_lleva_el_id_del_outbox(self):
         with self.captureOnCommitCallbacks(execute=True):
             self.agregar()
-        self.assertEqual(self.publicar.call_args.kwargs['evento_id'], EventoSalida.objects.get().id)
+        evento = EventoSalida.objects.exclude(tipo=TIPO_OPERACION).get()
+        self.assertEqual(self.publicar.call_args.kwargs['evento_id'], evento.id)
 
     def test_iniciar_avisa_reproduccion_y_cola_en_orden(self):
         elemento_id = self.agregar().json()['pendientes'][0]['id']

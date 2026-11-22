@@ -3,6 +3,7 @@ import uuid
 
 from django.db import connection
 
+from apps.mensajeria.publicador import TIPO_OPERACION
 from apps.musicqueue.models import Cola, ElementoCola, EventoSalida
 from .utilidades import PruebasCola, PruebasColaConcurrentes
 
@@ -88,7 +89,7 @@ class AgregarTests(PruebasCola):
 
     def test_deja_el_evento_cola_actualizada(self):
         estado = self.agregar().json()
-        evento = EventoSalida.objects.get()
+        evento = EventoSalida.objects.exclude(tipo=TIPO_OPERACION).get()
         self.assertEqual((evento.tipo, evento.version, evento.datos),
                          ('cola.actualizada', 1, estado))
 

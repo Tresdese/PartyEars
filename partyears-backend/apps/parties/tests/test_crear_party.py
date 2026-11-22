@@ -6,6 +6,7 @@ from unittest.mock import patch
 import jwt
 from django.db import IntegrityError, transaction
 from django.utils import timezone
+from apps.mensajeria.publicador import TIPO_OPERACION
 from apps.parties.codigos import generar_codigo
 from apps.parties.models import (AnfitrionParty, EventoSalida, InvitacionParty, MiembroParty, OperacionConfirmada, ParticipacionParty, Party)
 from .utilidades import CLAVE_PRIVADA, OTRA_CLAVE_PRIVADA, PruebasBase, hacer_token
@@ -58,7 +59,7 @@ class CrearPartyTests(PruebasBase):
         self.assertEqual(recibo.codigo_respuesta, 201)
         self.assertEqual(recibo.resultado['party_id'], estado['id'])
 
-        evento = EventoSalida.objects.get(agregado_id=party.id)
+        evento = EventoSalida.objects.get(agregado_id=party.id, tipo='party.creada')
         self.assertEqual(evento.tipo, 'party.creada')
         self.assertIsNone(evento.publicado_en)
 
@@ -177,7 +178,7 @@ class IdempotenciaTests(PruebasBase):
         self.assertEqual(repetida.json(), primera.json())
         self.assertEqual(Party.objects.count(), 1)
         self.assertEqual(InvitacionParty.objects.count(), 1)
-        self.assertEqual(EventoSalida.objects.count(), 1)
+        self.assertEqual(EventoSalida.objects.exclude(tipo=TIPO_OPERACION).count(), 1)
 
     def test_el_reintento_funciona_aunque_el_usuario_ya_este_en_la_party(self):
         usuario_id = uuid.uuid4()

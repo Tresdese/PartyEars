@@ -3,7 +3,9 @@ import uuid
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from .errores import ErrorApi, datos_invalidos
-from .servicios import (cambiar_permisos, consultar_party, crear_party, expulsar_miembro,
+from .servicios import (OPERACION_EXPULSAR, OPERACION_FINALIZAR, OPERACION_PERMISOS,
+                        OPERACION_REHABILITAR, OPERACION_SALIR, OPERACION_TRANSFERIR,
+                        cambiar_permisos, consultar_party, crear_party, expulsar_miembro,
                         finalizar_party, leer_clave_idempotencia, party_actual,
                         rehabilitar_miembro, salir_party, transferir_anfitrion,
                         unirse_party)
@@ -102,6 +104,7 @@ def validar_version(cuerpo):
 
 class PermisosView(APIView):
     """PUT /api/v1/party/parties/{party_id}/miembros/{usuario_id}/permisos (RF-17, RF-18)."""
+    operaciones = {'PUT': OPERACION_PERMISOS}
 
     def put(self, request, party_id, usuario_id):
         clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
@@ -114,6 +117,7 @@ class PermisosView(APIView):
 
 class SalirView(APIView):
     """POST /api/v1/party/parties/{party_id}/salir (RF-19, RF-22)."""
+    operaciones = {'POST': OPERACION_SALIR}
 
     def post(self, request, party_id):
         clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
@@ -123,6 +127,7 @@ class SalirView(APIView):
 
 class FinalizarView(APIView):
     """POST /api/v1/party/parties/{party_id}/finalizar (RF-20)."""
+    operaciones = {'POST': OPERACION_FINALIZAR}
 
     def post(self, request, party_id):
         clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
@@ -133,6 +138,7 @@ class FinalizarView(APIView):
 class ExpulsarView(APIView):
     """POST /api/v1/party/parties/{party_id}/miembros/{usuario_id}/expulsar (RF-30)."""
     servicio = staticmethod(expulsar_miembro)
+    operaciones = {'POST': OPERACION_EXPULSAR}
 
     def post(self, request, party_id, usuario_id):
         clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
@@ -144,10 +150,12 @@ class ExpulsarView(APIView):
 class RehabilitarView(ExpulsarView):
     """POST /api/v1/party/parties/{party_id}/miembros/{usuario_id}/rehabilitar (RF-30)."""
     servicio = staticmethod(rehabilitar_miembro)
+    operaciones = {'POST': OPERACION_REHABILITAR}
 
 
 class AnfitrionView(APIView):
     """POST /api/v1/party/parties/{party_id}/anfitrion (RF-31)."""
+    operaciones = {'POST': OPERACION_TRANSFERIR}
 
     def post(self, request, party_id):
         clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
