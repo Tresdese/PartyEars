@@ -44,6 +44,12 @@ class _PartyFalso implements PartyService {
     Future<PartyActual> consultar(String partyId) => crear('Consultada');
 
     @override
+    Future<void> salir(String partyId) async {}
+
+    @override
+    Future<void> finalizar(String partyId) async {}
+
+    @override
     Future<int> cambiarPermisos(String partyId, String usuarioId, {required bool puedeAportar, required bool puedeModificarCola,
                                 required int versionEsperada}) async => versionEsperada + 1;
 }
@@ -101,7 +107,11 @@ void main() {
                 await tester.tap(find.text('Crear Party'));
                 await tester.pumpAndSettle();
                 expect(find.text('K7Q2ZP'), findsNWidgets(2));
-                await tester.tap(find.text('Salir de la party (demo)'));
+                await tester.ensureVisible(find.text('Salir de la party'));
+                await tester.pumpAndSettle();
+                await tester.tap(find.text('Salir de la party'));
+                await tester.pumpAndSettle();
+                await tester.tap(find.widgetWithText(FilledButton, 'Salir'));
                 await tester.pumpAndSettle();
                 expect(find.text('K7Q2ZP'), findsNothing);
             }
@@ -144,7 +154,7 @@ void main() {
                             onCreate: (nombre, {clave}) async {
                                 llamadas++;
                             },
-                            onLeave: () {},
+                            onLeave: (_) {},
                         ),
                     ),
                 ));
@@ -167,7 +177,7 @@ void main() {
                                 mensaje: 'Ya estás en otra party. Sal de ella para continuar.',
                                 estadoHttp: 409,
                             ),
-                            onLeave: () {},
+                            onLeave: (_) {},
                         ),
                     ),
                 ));
@@ -199,7 +209,7 @@ void main() {
                                     );
                                 }
                             },
-                            onLeave: () {},
+                            onLeave: (_) {},
                         ),
                     ),
                 ));

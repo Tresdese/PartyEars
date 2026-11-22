@@ -115,6 +115,44 @@ class SesionParty extends ChangeNotifier {
         }
     }
 
+    /// CU-15. Devuelve el mensaje para el usuario, o null si salió sin novedad. Siempre deja la
+    /// sesión cerrada: el usuario vuelve a la pantalla principal pase lo que pase.
+    Future<String?> salir() async {
+        String? mensaje;
+        try {
+            await partyService.salir(_party.id);
+        } on ApiException catch (e) {
+            mensaje = switch (e.codigo) {
+                // FA-2.1: already out or the party ended; the result is the same.
+                'NO_ES_MIEMBRO' || 'PARTY_FINALIZADA' => null,
+                // EX-01: the server drops the member on its own when the heartbeat stops (T-38).
+                _ => 'No fue posible confirmar la salida con el servidor',
+            };
+        }
+        // Not awaited: the user leaves the screen now; the audio and socket close behind.
+        unawaited(cerrar());
+        return mensaje;
+    }
+
+    /// CU-16 desde el anfitrión. Devuelve el mensaje; [cierre] indica si la party terminó.
+    Future<String> finalizar() async {
+        try {
+            await partyService.finalizar(_party.id);
+        } on ApiException catch (e) {
+            switch (e.codigo) {
+                case 'NO_ES_ANFITRION':
+                    return 'Solo el anfitrión puede finalizar la party';
+                case 'PARTY_FINALIZADA':
+                    break;
+                default:
+                    return 'No fue posible finalizar la party. Intenta de nuevo.';
+            }
+        }
+        _cambiar(() => cierre = WsMotivoCierre.partyFinalizada);
+        unawaited(cerrar());
+        return 'La party ha finalizado';
+    }
+
     /// CU-13 y CU-14: el anfitrión da o quita permisos. Devuelve el mensaje para el anfitrión.
     Future<String> cambiarPermisos(MiembroParty miembro, {required bool puedeAportar, required bool puedeModificarCola}) async {
         final otorga = (puedeAportar && !miembro.puedeAportar) || (puedeModificarCola && !miembro.puedeModificarCola);

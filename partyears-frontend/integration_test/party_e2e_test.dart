@@ -167,8 +167,15 @@ void main() {
         expect(await miembro.agregar('00000000-0000-4000-8000-000000000008'),
                'Ya no tienes permiso para agregar canciones a esta party');
 
-        await miembro.cerrar();
-        await anfitrion.cerrar();
+        // T-37: the member leaves, the host sees it live, then the host ends the party.
+        final miembroId = miembro.usuarioId;
+        expect(await miembro.salir(), isNull);
+        await _esperarHasta(() => anfitrion.party.miembro(miembroId)?.conectado == false);
+        expect(await anfitrion.finalizar(), 'La party ha finalizado');
+
+        // Having really left, the member can create another party (no YA_EN_OTRA_PARTY).
+        final otra = await PartyService(apiMiembro).crear('E2E T-55');
+        await PartyService(apiMiembro).finalizar(otra.id);
         await music.close(force: true);
         // ignore: avoid_print
         print('PARTY_ID ${party.id}');
