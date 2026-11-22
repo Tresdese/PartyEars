@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import '../player/reproductor.dart';
 import 'data/cola_models.dart';
 
@@ -48,6 +50,7 @@ class Sincronizador {
         required this.abrirAudio,
         this.limite = const Duration(milliseconds: 200),
         this.periodo = const Duration(milliseconds: 500),
+        this.pausaTrasCorregir = const Duration(milliseconds: 1500),
     });
 
     final Reproductor reproductor;
@@ -55,6 +58,9 @@ class Sincronizador {
     final Future<void> Function(String recursoAudioId, Duration desde) abrirAudio;
     final Duration limite;
     final Duration periodo;
+    final Duration pausaTrasCorregir;
+
+    static const _adelantoMaximo = Duration(seconds: 3);
 
     EstadoReproduccion _estado = EstadoReproduccion.detenida;
     String? _elementoAbierto;
@@ -62,6 +68,10 @@ class Sincronizador {
     Timer? _revision;
     int _generacion = 0;
     int correcciones = 0;
+    // How far ahead to seek so the audio lands on time: over Wi-Fi a seek in a FLAC takes longer
+    // than the 200 ms limit, and the song keeps moving while it loads.
+    Duration _adelanto = Duration.zero;
+    DateTime? _corregidoEn;
 
     EstadoReproduccion get estado => _estado;
 
@@ -110,11 +120,26 @@ class Sincronizador {
     /// Una revisión: si el audio se alejó más del límite, salta a donde debería estar.
     Future<void> revisar() async {
         if (!_estado.sonando || _arranque?.isActive == true || _elementoAbierto == null) return;
+        // Waiting after a seek instead of checking on the next tick: the player still reports
+        // the old position while it loads, and checking right away seeked forever (T-31).
+        final ahora = DateTime.now();
+        if (_corregidoEn != null && ahora.difference(_corregidoEn!) < pausaTrasCorregir) return;
         final esperada = posicionEsperada(_estado, reloj.ahora());
-        if ((reproductor.posicion - esperada).abs() > limite) {
-            correcciones++;
-            await reproductor.irA(esperada);
+        final desfase = reproductor.posicion - esperada;
+        if (desfase.abs() <= limite) {
+            _corregidoEn = null;
+            return;
         }
+        // Still off right after a correction: that error is what the seek costs on this device.
+        if (_corregidoEn != null) {
+            final nuevo = _adelanto - desfase;
+            _adelanto = nuevo.isNegative ? Duration.zero : (nuevo > _adelantoMaximo ? _adelantoMaximo : nuevo);
+        }
+        correcciones++;
+        debugPrint('sync: desfase ${desfase.inMilliseconds} ms, corrección $correcciones, '
+                   'adelanto ${_adelanto.inMilliseconds} ms');
+        _corregidoEn = ahora;
+        await reproductor.irA(esperada + _adelanto);
     }
 
     void cerrar() {
