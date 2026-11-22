@@ -84,7 +84,7 @@ Códigos HTTP:
 | 401 | Sin autenticación válida | `TOKEN_INVALIDO`, `CREDENCIALES_INVALIDAS` |
 | 403 | Autenticado pero sin permiso | `SIN_PERMISO`, `NO_ES_ANFITRION`, `NO_ES_MIEMBRO`, `USUARIO_EXPULSADO`, `CUENTA_INACTIVA` |
 | 404 | No existe | `NO_ENCONTRADO`, `CODIGO_INVALIDO` |
-| 409 | Choca con el estado actual | `VERSION_OBSOLETA`, `PARTY_LLENA`, `YA_EN_OTRA_PARTY`, `IDEMPOTENCIA_CONFLICTO`, `ELEMENTO_NO_ACTUAL`, `ELEMENTO_NO_PENDIENTE`, `REPRODUCCION_EN_CURSO`, `COLA_VACIA`, `DUPLICADO` |
+| 409 | Choca con el estado actual | `VERSION_OBSOLETA`, `PARTY_LLENA`, `YA_EN_OTRA_PARTY`, `IDEMPOTENCIA_CONFLICTO`, `ELEMENTO_NO_ACTUAL`, `ELEMENTO_NO_PENDIENTE`, `REPRODUCCION_EN_CURSO`, `COLA_VACIA`, `PARTICIPANTE_NO_CONECTADO`, `DUPLICADO` |
 | 410 | Ya no está disponible | `PARTY_FINALIZADA`, `CODIGO_EXPIRADO`, `AUDIO_NO_DISPONIBLE` |
 | 503 | Un servicio del que depende no responde | `SERVICIO_NO_DISPONIBLE` |
 
@@ -328,7 +328,9 @@ Requiere `Idempotency-Key`. Solo el anfitrión.
 
 El cambio aplica en la siguiente operación aunque el cliente del miembro no se haya actualizado: `queue` consulta los permisos a `party` en cada operación (5.2).
 
-Errores: `403 NO_ES_ANFITRION`, `404 NO_ENCONTRADO`, `409 VERSION_OBSOLETA`, `410 PARTY_FINALIZADA`.
+Dar un permiso exige que el participante esté conectado: si no, `409 PARTICIPANTE_NO_CONECTADO` (CU-13, FA-4.1). Quitarlo no lo exige, para que el anfitrión pueda retirar permisos a quien se desconectó (CU-14, FA-5.1).
+
+Errores: `403 NO_ES_ANFITRION`, `404 NO_ENCONTRADO`, `409 VERSION_OBSOLETA`, `409 PARTICIPANTE_NO_CONECTADO`, `410 PARTY_FINALIZADA`.
 
 ### 4.5 Anfitrión y expulsión (RF-30, RF-31)
 

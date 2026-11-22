@@ -44,6 +44,15 @@ class PartyService {
         return PartyActual.desdeJson(_comoMapa(await _api.get(Servicio.party, '/parties/$partyId')));
     }
 
+    /// Contrato 4.4: solo el anfitrión. Devuelve la nueva versión de la party.
+    Future<int> cambiarPermisos(String partyId, String usuarioId, {required bool puedeAportar, required bool puedeModificarCola,
+                                required int versionEsperada}) async {
+        final respuesta = _comoMapa(await _api.put(Servicio.party, '/parties/$partyId/miembros/$usuarioId/permisos',
+                                                   cuerpo: {'puede_aportar': puedeAportar, 'puede_modificar_cola': puedeModificarCola,
+                                                            'version_esperada': versionEsperada}, idempotente: true));
+        return (respuesta['version'] as num).toInt();
+    }
+
     static Map<String, dynamic> _comoMapa(Object? respuesta) {
         if (respuesta is! Map<String, dynamic>) {
             throw const ApiException(

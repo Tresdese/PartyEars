@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:partyears_frontend/core/network/simulado.dart';
+import 'package:partyears_frontend/core/network/ws_client.dart';
 import 'package:partyears_frontend/features/party/data/cola_models.dart';
 import 'package:partyears_frontend/features/party/data/cola_service.dart';
 import 'package:partyears_frontend/features/party/data/party_models.dart';
@@ -50,6 +51,8 @@ class PartyServiceFalso implements PartyService {
 
     PartyActual party;
     int consultas = 0;
+    final cambiosPermisos = <String>[];
+    Object? errorPermisos;
 
     @override
     Future<PartyActual?> actual() async => null;
@@ -57,6 +60,14 @@ class PartyServiceFalso implements PartyService {
     Future<PartyActual> crear(String nombre, {String? clave}) async => party;
     @override
     Future<PartyActual> unirse(String codigo, {String? clave}) async => party;
+    @override
+    Future<int> cambiarPermisos(String partyId, String usuarioId, {required bool puedeAportar, required bool puedeModificarCola,
+                                required int versionEsperada}) async {
+        if (errorPermisos != null) throw errorPermisos!;
+        cambiosPermisos.add('$usuarioId $puedeAportar $puedeModificarCola v$versionEsperada');
+        return versionEsperada + 1;
+    }
+
     @override
     Future<PartyActual> consultar(String partyId) async {
         consultas++;
@@ -68,6 +79,17 @@ class ColaServiceFalsa implements ColaService {
     EstadoCola cola = EstadoCola.vacia;
     final acciones = <String>[];
     final terminadas = <String>[];
+    final agregadas = <String>[];
+    final clavesAgregar = <String?>[];
+    Object? errorAgregar;
+
+    @override
+    Future<EstadoCola> agregar(String partyId, String recursoAudioId, {String? clave}) async {
+        clavesAgregar.add(clave);
+        if (errorAgregar != null) throw errorAgregar!;
+        agregadas.add(recursoAudioId);
+        return EstadoCola(version: cola.version + agregadas.length, pendientes: cola.pendientes);
+    }
 
     @override
     Future<EstadoCola> consultar(String partyId) async => cola;
@@ -84,6 +106,29 @@ class ColaServiceFalsa implements ColaService {
 class WsQuieto extends WsSimulado {
     @override
     Future<void> conectar() async {}
+}
+
+/// WebSocket que queda conectado al instante, sin eventos ni temporizadores.
+class WsConectado implements WsClient {
+    final _estado = StreamController<WsEstado>.broadcast();
+
+    @override
+    Stream<WsEstado> get estado => _estado.stream;
+    @override
+    WsEstado estadoActual = WsEstado.desconectado;
+    @override
+    Stream<WsEvento> get eventos => const Stream.empty();
+    @override
+    Stream<WsMotivoCierre> get cierres => const Stream.empty();
+    @override
+    Future<void> conectar() async {
+        estadoActual = WsEstado.conectado;
+        _estado.add(estadoActual);
+    }
+    @override
+    bool enviar(String tipo, [Map<String, dynamic>? datos]) => true;
+    @override
+    Future<void> cerrar() => _estado.close();
 }
 
 const partyDePrueba = PartyActual(id: 'p1', nombre: 'Viernes', codigo: 'K7Q2ZP', version: 1, anfitrionId: 'u1');
