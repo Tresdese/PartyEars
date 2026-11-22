@@ -3,7 +3,8 @@ import uuid
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from .errores import ErrorApi, datos_invalidos
-from .servicios import crear_party, leer_clave_idempotencia, party_actual, unirse_party
+from .servicios import (consultar_party, crear_party, leer_clave_idempotencia, party_actual,
+                        unirse_party)
 
 FORMATO_CODIGO = re.compile(r'^[A-Z0-9]{6}$')
 
@@ -69,3 +70,10 @@ class UnirseView(APIView):
         codigo = validar_codigo(request.data)
         estado, codigo_http = unirse_party(request.user, codigo, clave)
         return Response(estado, status=codigo_http)
+
+
+class PartyView(APIView):
+    """GET /api/v1/party/parties/{party_id} (RF-09)."""
+
+    def get(self, request, party_id):
+        return Response(consultar_party(request.user, party_id))
