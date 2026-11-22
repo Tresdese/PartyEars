@@ -121,7 +121,22 @@ class PartyConsumer(AsyncWebsocketConsumer):
                                               'datos': {'version': version}}))
 
     async def evento(self, mensaje):
-        await self.send(text_data=json.dumps(mensaje['mensaje']))
+        evento = mensaje['mensaje']
+        await self.send(text_data=json.dumps(evento))
+        cierre = self.cierre_tras(evento)
+        if cierre is not None:
+            await self.close(code=cierre)
+
+    def cierre_tras(self, evento):
+        # Closing here instead of trusting the client: whoever left or whose party ended must
+        # stop receiving updates (RF-19, RF-20), even if the app never closes the socket.
+        if evento['tipo'] == 'party.finalizada':
+            return 4010
+        if evento['tipo'] == 'miembro.salida':
+            saliente = str(evento['datos'].get('usuario_id', '')).lower()
+            if self.usuario_id is not None and saliente == self.usuario_id.lower():
+                return 4003
+        return None
 
     async def disconnect(self, code):
         self.cronometro.cancel()
