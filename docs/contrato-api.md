@@ -84,7 +84,7 @@ Códigos HTTP:
 | 401 | Sin autenticación válida | `TOKEN_INVALIDO`, `CREDENCIALES_INVALIDAS` |
 | 403 | Autenticado pero sin permiso | `SIN_PERMISO`, `NO_ES_ANFITRION`, `NO_ES_MIEMBRO`, `USUARIO_EXPULSADO`, `CUENTA_INACTIVA` |
 | 404 | No existe | `NO_ENCONTRADO`, `CODIGO_INVALIDO` |
-| 409 | Choca con el estado actual | `VERSION_OBSOLETA`, `PARTY_LLENA`, `YA_EN_OTRA_PARTY`, `IDEMPOTENCIA_CONFLICTO`, `ELEMENTO_NO_ACTUAL`, `DUPLICADO` |
+| 409 | Choca con el estado actual | `VERSION_OBSOLETA`, `PARTY_LLENA`, `YA_EN_OTRA_PARTY`, `IDEMPOTENCIA_CONFLICTO`, `ELEMENTO_NO_ACTUAL`, `ELEMENTO_NO_PENDIENTE`, `DUPLICADO` |
 | 410 | Ya no está disponible | `PARTY_FINALIZADA`, `CODIGO_EXPIRADO`, `AUDIO_NO_DISPONIBLE` |
 | 503 | Un servicio del que depende no responde | `SERVICIO_NO_DISPONIBLE` |
 
@@ -312,7 +312,7 @@ Errores: `404 CODIGO_INVALIDO`, `410 CODIGO_EXPIRADO`, `410 PARTY_FINALIZADA`, `
 
 ### 4.3 `GET /api/v1/party/parties/{party_id}` (RF-09)
 
-Estado completo. Solo miembros. Es la instantánea que el cliente pide al conectar o reconectar el WebSocket (7.5).
+Estado completo. Solo miembros: habilitado y con participación abierta, igual que en 7.2. Es la instantánea que el cliente pide al conectar o reconectar el WebSocket (7.5); `queue` también la usa para validar permisos (5.2). Errores: `403 NO_ES_MIEMBRO`, `404 NO_ENCONTRADO`, `410 PARTY_FINALIZADA`.
 
 ### 4.4 `PUT /api/v1/party/parties/{party_id}/miembros/{usuario_id}/permisos` (RF-17, RF-18)
 
@@ -416,6 +416,10 @@ Solo miembros. Agregar requiere ser anfitrión o tener `puede_aportar`; reordena
 
 `queue` conoce miembros, permisos y anfitrión por los eventos que publica `party` (RabbitMQ `party.eventos`); no llama a `party` en cada operación.
 
+`PENDIENTE (Darlington, después del MVP)`: mientras no exista el envío del outbox de `party` a RabbitMQ ni el consumidor en `queue`, `queue` consulta 4.3 con el token del usuario en cada operación. Mientras tanto, si `party` no responde, la cola compartida responde `503 SERVICIO_NO_DISPONIBLE`, y los errores de 4.3 (`403 NO_ES_MIEMBRO`, `404 NO_ENCONTRADO`, `410 PARTY_FINALIZADA`) llegan tal cual al cliente.
+
+La cola de una party se crea la primera vez que se consulta o se modifica.
+
 #### `GET /api/v1/queue/parties/{party_id}/cola`
 
 Estado de la cola compartida.
@@ -426,7 +430,7 @@ Estado de la cola compartida.
 { "recurso_audio_id": "uuid" }
 ```
 
-Se agrega al final. No inicia la reproducción aunque la cola esté vacía. La misma canción puede estar varias veces. Errores: `403 SIN_PERMISO`, `410 AUDIO_NO_DISPONIBLE`, `410 PARTY_FINALIZADA`.
+`201` con el estado de la cola. Se agrega al final. No inicia la reproducción aunque la cola esté vacía. La misma canción puede estar varias veces. Errores: `403 SIN_PERMISO`, `410 AUDIO_NO_DISPONIBLE`, `410 PARTY_FINALIZADA`.
 
 #### `PATCH /api/v1/queue/parties/{party_id}/cola/elementos/{elemento_id}` (RF-12)
 
@@ -434,7 +438,7 @@ Se agrega al final. No inicia la reproducción aunque la cola esté vacía. La m
 { "nueva_posicion": 1, "version_esperada": 31 }
 ```
 
-`nueva_posicion` cuenta desde 1 dentro de los pendientes. Solo se mueven pendientes; mover el actual o el historial da `409 ELEMENTO_NO_PENDIENTE`. Errores: `403 SIN_PERMISO`, `409 VERSION_OBSOLETA`.
+`nueva_posicion` cuenta desde 1 dentro de los pendientes; fuera de rango da `400 DATOS_INVALIDOS`. Solo se mueven pendientes; mover el actual o el historial da `409 ELEMENTO_NO_PENDIENTE`. Errores: `403 SIN_PERMISO`, `404 NO_ENCONTRADO`, `409 VERSION_OBSOLETA`.
 
 #### `DELETE /api/v1/queue/parties/{party_id}/cola/elementos/{elemento_id}?version_esperada=31` (RF-13)
 

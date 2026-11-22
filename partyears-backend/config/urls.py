@@ -10,3 +10,6 @@ if 'django.contrib.admin' in settings.INSTALLED_APPS:
 
 if 'apps.parties' in settings.INSTALLED_APPS:
     urlpatterns.append(path('', include('apps.parties.urls')))
+
+if 'apps.musicqueue' in settings.INSTALLED_APPS:
+    urlpatterns.append(path('', include('apps.musicqueue.urls')))
