@@ -3,8 +3,8 @@ import uuid
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from .errores import ErrorApi, datos_invalidos
-from .servicios import (cambiar_permisos, consultar_party, crear_party, leer_clave_idempotencia,
-                        party_actual, unirse_party)
+from .servicios import (cambiar_permisos, consultar_party, crear_party, finalizar_party,
+                        leer_clave_idempotencia, party_actual, salir_party, unirse_party)
 
 FORMATO_CODIGO = re.compile(r'^[A-Z0-9]{6}$')
 
@@ -104,3 +104,21 @@ class PermisosView(APIView):
                                                   puede_aportar, puede_modificar_cola, version,
                                                   clave)
         return Response(resultado, status=codigo_http)
+
+
+class SalirView(APIView):
+    """POST /api/v1/party/parties/{party_id}/salir (RF-19, RF-22)."""
+
+    def post(self, request, party_id):
+        clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
+        _, codigo_http = salir_party(request.user, party_id, clave)
+        return Response(status=codigo_http)
+
+
+class FinalizarView(APIView):
+    """POST /api/v1/party/parties/{party_id}/finalizar (RF-20)."""
+
+    def post(self, request, party_id):
+        clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
+        _, codigo_http = finalizar_party(request.user, party_id, clave)
+        return Response(status=codigo_http)
