@@ -58,8 +58,15 @@ class PartyServiceFalso implements PartyService {
     Future<PartyActual?> actual() async => null;
     @override
     Future<PartyActual> crear(String nombre, {String? clave}) async => party;
+    final reingresos = <String>[];
+    Object? errorUnirse;
+
     @override
-    Future<PartyActual> unirse(String codigo, {String? clave}) async => party;
+    Future<PartyActual> unirse(String codigo, {String? clave}) async {
+        reingresos.add(codigo);
+        if (errorUnirse != null) throw errorUnirse!;
+        return party;
+    }
     final salidas = <String>[];
     Object? errorSalir;
     Object? errorFinalizar;

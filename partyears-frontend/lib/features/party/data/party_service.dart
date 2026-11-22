@@ -11,6 +11,10 @@ class PartyService {
 
     final ApiClient _api;
 
+    /// Code each party was entered with on this device, to come back after a disconnection
+    /// (contract 7.5 step 6). Members never get the code from the server, only who typed it.
+    static final codigosDeIngreso = <String, String>{};
+
     Future<PartyActual> crear(String nombre, {String? clave}) async {
         final respuesta = await _api.post(Servicio.party, '/parties', cuerpo: {'nombre': nombre}, idempotente: true, idempotencyKey: clave,);
 
@@ -29,14 +33,17 @@ class PartyService {
                 mensaje: 'El servidor no devolvió el código de la party.',
             );
         }
+        codigosDeIngreso[party.id] = party.codigo!;
         return party;
     }
 
     /// Contrato 4.2: entra como oyente con el código de invitación.
     Future<PartyActual> unirse(String codigo, {String? clave}) async {
         final respuesta = await _api.post(Servicio.party, '/parties/unirse', cuerpo: {'codigo': codigo}, idempotente: true, idempotencyKey: clave,);
+        final party = PartyActual.desdeJson(_comoMapa(respuesta));
+        codigosDeIngreso[party.id] = codigo;
 
-        return PartyActual.desdeJson(_comoMapa(respuesta));
+        return party;
     }
 
     /// Contrato 4.3: la instantánea que se pide al conectar o reconectar el WebSocket.
