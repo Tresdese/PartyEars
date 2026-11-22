@@ -60,8 +60,12 @@ class PartyConsumer(AsyncWebsocketConsumer):
             await self.close(code=4001)
         elif mensaje.get('tipo') == 'reloj.ping':
             await self.responder_reloj(mensaje)
-        # TODO(T-38): other message types from authenticated clients are ignored until the
-        # heartbeat ('latido', contract 7.4) is implemented.
+        elif mensaje.get('tipo') == 'latido':
+            # Answering instead of ignoring: the client drops the socket after 15 s without
+            # hearing from the server, so a quiet party would reconnect every 15 s.
+            await self.send(text_data=json.dumps({'tipo': 'latido.ok'}))
+        # TODO(T-38): the server does not yet mark members disconnected after 15 s without a
+        # heartbeat (miembro.desconectado, contract 7.4).
 
     async def responder_reloj(self, mensaje):
         datos = mensaje.get('datos')
