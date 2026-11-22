@@ -541,6 +541,8 @@ Cada servicio con eventos tiene su propio WebSocket por party. Si un servicio ca
 
 La cola individual no usa WebSocket.
 
+Para el MVP, `queue` no tiene WebSocket propio: publica `cola.actualizada` y `reproduccion.estado` en el WebSocket de `party`, por el mismo Redis. El cliente abre una sola conexión para party y cola. En esos eventos, `version` es la de la **cola**, no la de la party: el cliente la compara con la instantánea de la cola (7.5). Desventaja: si `party` cae, la cola deja de avisar en vivo, igual que ya deja de validar permisos (5.2).
+
 `PENDIENTE (los tres)`: la alternativa es un único WebSocket en un servicio que reenvíe los eventos de todos. Es más simple para el cliente, pero si ese servicio cae, la party pierde todo el tiempo real. La propuesta es la de la tabla.
 
 ### 7.2 Autenticación

@@ -1,14 +1,20 @@
 import hashlib
 import json
+import logging
 import uuid
 from datetime import timedelta, timezone as zona_utc
 
+from asgiref.sync import async_to_sync
 from django.db import connection, transaction
 from django.db.models import Max
 from django.utils import timezone
+from redis.exceptions import RedisError
 
 from apps.parties.errores import ErrorApi
+from apps.parties.eventos import publicar
 from .models import Cola, ElementoCola, EventoSalida, OperacionConfirmada
+
+logger = logging.getLogger(__name__)
 
 OPERACION_AGREGAR = 'cola.agregar'
 OPERACION_REORDENAR = 'cola.reordenar'
@@ -152,11 +158,21 @@ def _registrar_operacion(cola, usuario_id, clave, operacion, solicitud, codigo_h
     )
 
 
+def _avisar_en_vivo(evento, party_id):
+    # Logging instead of failing the request: the change is already committed, and members
+    # who miss the live event catch up through the snapshot (contract 7.5).
+    try:
+        async_to_sync(publicar)(str(party_id), evento.tipo, evento.datos, evento.version,
+                                evento_id=evento.id)
+    except (RedisError, OSError):
+        logger.exception('No se pudo avisar %s de la cola %s', evento.tipo, evento.agregado_id)
+
+
 def _emitir(cola, tipo, datos, ahora):
-    # TODO(T-34): nothing delivers these events live yet; members only see the change on
-    # their next GET.
-    EventoSalida.objects.create(agregado_id=cola.id, version=cola.version, tipo=tipo,
-                                datos=datos, creado_en=ahora)
+    evento = EventoSalida.objects.create(agregado_id=cola.id, version=cola.version, tipo=tipo,
+                                         datos=datos, creado_en=ahora)
+    # After commit instead of right away: a rolled back change must never reach the clients.
+    transaction.on_commit(lambda: _avisar_en_vivo(evento, cola.party_id))
 
 
 def _confirmar(cola, usuario_id, clave, operacion, solicitud, codigo_http, ahora):
