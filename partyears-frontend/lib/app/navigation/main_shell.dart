@@ -64,6 +64,15 @@ class _MainShellState extends State<MainShell> {
         setState(() => _party = party);
     }
 
+    // CU-15 step 6 and CU-16 step 8: back to the main screen, with the message if there is one.
+    void _salirDeParty(String? mensaje) {
+        setState(() {
+            _party = null;
+            _selectedIndex = 0;
+        });
+        if (mensaje != null) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mensaje)));
+    }
+
     static const List<({String? section, String label, IconData icon})> _items = [
         (section: 'Descubrir', label: 'Inicio', icon: Icons.home_outlined),
         (section: null, label: 'Música', icon: Icons.music_note_outlined),
@@ -106,7 +115,7 @@ class _MainShellState extends State<MainShell> {
                                 party: _party,
                                 onCreate: _crearParty,
                                 onJoin: _unirseParty,
-                                onLeave: () => setState(() => _party = null),
+                                onLeave: _salirDeParty,
                             ),
                             const ProfileScreen(),
                         ],

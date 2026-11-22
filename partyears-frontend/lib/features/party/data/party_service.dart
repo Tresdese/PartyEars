@@ -44,6 +44,16 @@ class PartyService {
         return PartyActual.desdeJson(_comoMapa(await _api.get(Servicio.party, '/parties/$partyId')));
     }
 
+    /// Contrato 4.1.3: si sale el anfitrión, el servidor aplica la sucesión.
+    Future<void> salir(String partyId) async {
+        await _api.post(Servicio.party, '/parties/$partyId/salir', idempotente: true);
+    }
+
+    /// Contrato 4.1.4: solo el anfitrión; todos reciben party.finalizada.
+    Future<void> finalizar(String partyId) async {
+        await _api.post(Servicio.party, '/parties/$partyId/finalizar', idempotente: true);
+    }
+
     /// Contrato 4.4: solo el anfitrión. Devuelve la nueva versión de la party.
     Future<int> cambiarPermisos(String partyId, String usuarioId, {required bool puedeAportar, required bool puedeModificarCola,
                                 required int versionEsperada}) async {

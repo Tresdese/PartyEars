@@ -24,7 +24,7 @@ class PartyScreen extends StatefulWidget {
     final Future<void> Function(String codigo, {String? clave})? onJoin;
 
     final Future<void> Function(String nombre, {String? clave}) onCreate;
-    final VoidCallback onLeave;
+    final void Function(String? mensaje) onLeave;
 
     @override
     State<PartyScreen> createState() => _PartyScreenState();
@@ -214,7 +214,7 @@ class _PartyScreenState extends State<PartyScreen> {
         ),
         const Divider(height: 40),
             OutlinedButton.icon(
-            onPressed: widget.onLeave,
+            onPressed: () => widget.onLeave(null),
             icon: const Icon(Icons.exit_to_app),
             label: const Text('Salir de la party (demo)'),
         ),
