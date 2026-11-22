@@ -45,6 +45,35 @@ El script crea el entorno virtual si no existe (`venv` en Linux, `.venv` en Wind
 
 No aplica migraciones: la base de desarrollo es compartida, así que se migra a mano (sección 6).
 
+## 2.1 Levantar todo el backend en tu máquina (prueba del MVP)
+
+En la prueba, el profesor elige la PC de uno del equipo para correr el backend y los demás se conectan a ella. Con esto, cualquiera puede hacerlo:
+
+1. **Conéctate a la VPN** del servidor (OpenVPN). El servidor queda en `10.9.0.1` y tu PC recibe una IP `10.9.0.x`: anótala, porque es la que los demás van a escribir en la app.
+2. **Configura `.env`** (sección 5) con:
+   - `DB_HOST=10.9.0.1` y tu `DB_USER` y `DB_PASSWORD`;
+   - `ALLOWED_HOSTS=<tu IP 10.9.0.x>`;
+   - `REDIS_URL` (sin Redis, los cambios de la cola no llegan a los teléfonos);
+   - las `*_RABBITMQ_URL`, que son opcionales: sin ellas no se guarda el registro técnico, pero la party funciona;
+   - `MUSIC_MEDIA_ROOT` apuntando a tu copia del catálogo.
+3. **Genera tus claves JWT** si no tienes `claves-dev/`. Usa los dos comandos `openssl` de `.env.example`; en Windows, desde Git Bash. Cada máquina puede tener las suyas: los tokens solo valen en el backend que los emitió.
+4. **Abre los puertos 8001 a 8004** en el firewall:
+   - en Linux, `sudo ufw allow 8001:8004/tcp`;
+   - en Windows, acepta el aviso de Python, o desde PowerShell como administrador:
+     ```powershell
+     New-NetFirewallRule -DisplayName PartyEars -Direction Inbound -Protocol TCP -LocalPort 8001-8004 -Action Allow
+     ```
+5. **Levanta todo:**
+   ```bash
+   ./partyearsBackend.sh todos     # una terminal; Ctrl+C detiene todo
+   ```
+   ```powershell
+   .\partyearsBackend.ps1 todos   # una ventana por servicio; ciérralas para detener
+   ```
+   Arranca auth, music, party y queue, más los procesos de eventos cuyas URL estén en `.env`.
+6. **Comprueba desde otra PC de la VPN:** `curl http://<tu IP>:8002/api/v1/music/canciones` debe responder `401` (llega y pide sesión).
+7. **En la app,** cada persona toca **Servidor → Cambiar** en la pantalla de inicio de sesión y escribe tu IP. Las cuentas y las parties están en la base compartida, así que sirven las mismas en cualquier máquina; solo hay que volver a iniciar sesión.
+
 ## 3. Instalar dependencias sin el script
 
 Con el entorno virtual activado:
