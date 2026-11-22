@@ -231,7 +231,9 @@ Autenticado. Entrega el archivo con soporte de rangos HTTP para adelantar y atra
 - Petición con `Range: bytes=0-` y respuesta `206 Partial Content` con `Content-Range`, `Accept-Ranges: bytes` y el `Content-Type` del recurso (`mime_type` en la BD).
 - Errores: `404 NO_ENCONTRADO`; `410 AUDIO_NO_DISPONIBLE` si el recurso está marcado como no disponible o el archivo falta en el servidor.
 
-`PENDIENTE (Axel, T-02)`: varias librerías de audio de Flutter no permiten mandar la cabecera `Authorization` al reproducir una URL. Si la elegida no lo permite, usar una URL firmada de corta duración (`GET .../audio-url` que devuelve `{"url": "...?firma=...&expira=..."}`), nunca el JWT en la URL, porque quedaría en los logs (RNF-05).
+El cliente manda el token en la cabecera `Authorization`. El reproductor elegido (`media_kit`, T-53) lo permite; está probado en Linux con un servidor que exige la cabecera y responde rangos. Nunca va el JWT en la URL, porque quedaría en los logs (RNF-05).
+
+Limitación: el reproductor pide rangos nuevos al adelantar, con el token con el que se abrió la canción. Si el token vence a mitad de una canción, el siguiente salto falla hasta reabrirla con un token nuevo. Si en la prueba con tokens de 5 minutos eso molesta, la alternativa es la URL firmada de corta duración (`GET .../audio-url`).
 
 ---
 
@@ -671,7 +673,6 @@ En `voz.senal` el cliente manda `para`; el servidor agrega `de` y solo lo reenv�
 |---|---|---|
 | Revocación de sesión con JWT (RF-04) | 1.3 | Axel y Darlington |
 | Nombres de usuario en `party` | 2.5 | Axel |
-| Audio con cabecera o URL firmada | 3.3 | Axel |
 | Vigencia del código de party | 4.1.1 | Mariana |
 | Quién puede avisar el fin de canción (tras T-14) | 5.3 | Darlington |
 | Límite de desfase y corrección | 5.3 | Darlington |
