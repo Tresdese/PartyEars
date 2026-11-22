@@ -344,7 +344,7 @@ Todas requieren `Idempotency-Key`, solo las ejecuta el anfitrión y devuelven `2
 | Expulsar | `POST .../parties/{party_id}/miembros/{usuario_id}/expulsar` | `{"version_esperada": 12}` |
 | Rehabilitar | `POST .../parties/{party_id}/miembros/{usuario_id}/rehabilitar` | `{"version_esperada": 12}` |
 
-- Transferir: el destinatario debe estar conectado y habilitado; si no, `409 DESTINATARIO_NO_ELEGIBLE`.
+- Transferir: el destinatario debe estar conectado y habilitado; si no, `409 DESTINATARIO_NO_ELEGIBLE`. Publica `anfitrion.cambio` (`manual`) y, si el nuevo anfitrión no tenía ambos permisos, `miembro.permisos` con los dos en `true`. El anterior conserva sus permisos de aportar y modificar la cola, pero pierde lo exclusivo del cargo: controlar la reproducción, cambiar permisos, expulsar, transferir y finalizar. Errores: `400 DATOS_INVALIDOS` (falta `usuario_id` o `version_esperada`, o se elige a sí mismo), `403 NO_ES_ANFITRION`, `404 NO_ENCONTRADO`, `409 VERSION_OBSOLETA`, `410 PARTY_FINALIZADA`.
 - Expulsar cierra su participación y su voz e impide que vuelva a entrar. Rehabilitar le permite entrar otra vez como oyente, sin conectarlo.
 - Expulsar publica `miembro.expulsado` y, si estaba conectado, `miembro.salida` (`expulsion`), en ese orden. El servidor cierra el WebSocket del expulsado con `4003` justo después de enviarle su `miembro.expulsado`. Sus permisos quedan en `false`. Si era el último conectado, la party finaliza (`sin_conectados`).
 - Rehabilitar publica `miembro.rehabilitado`. Expulsar a quien ya está expulsado, o rehabilitar a quien ya está habilitado, responde `204` sin cambiar la versión.
