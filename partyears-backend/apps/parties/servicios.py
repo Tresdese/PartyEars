@@ -167,12 +167,13 @@ def unirse_party(usuario, codigo, clave):
     if party.participaciones.filter(salida_en__isnull=True).count() >= party.capacidad:
         raise ErrorApi(409, 'PARTY_LLENA', 'La party ya tiene el máximo de personas conectadas.')
 
+    reconecta = False
     if miembro is None:
-        miembro = MiembroParty.objects.create(party=party, usuario_id=usuario.id,
-                                              incorporado_en=ahora)
-    elif not _puede_conservar_permisos(party, usuario.id, ahora):
-        MiembroParty.objects.filter(id=miembro.id).update(puede_aportar=False,
-                                                          puede_modificar_cola=False)
+        miembro = MiembroParty.objects.create(party=party, usuario_id=usuario.id, incorporado_en=ahora)
+    elif _puede_conservar_permisos(party, usuario.id, ahora):
+        reconecta = True
+    else:
+        MiembroParty.objects.filter(id=miembro.id).update(puede_aportar=False, puede_modificar_cola=False)
         miembro.puede_aportar = miembro.puede_modificar_cola = False
 
     try:
@@ -193,11 +194,12 @@ def unirse_party(usuario, codigo, clave):
         codigo_respuesta=200, resultado={'party_id': str(party.id), 'version': party.version},
         confirmada_en=ahora,
     )
-    datos = formatear_miembro(miembro, participacion, usuario.nombre_usuario)
-    EventoSalida.objects.create(agregado_id=party.id, version=party.version, tipo='miembro.ingreso',
-                                creado_en=ahora, datos=datos)
-    transaction.on_commit(
-        lambda: _avisar_conectados(party.id, 'miembro.ingreso', datos, party.version))
+    if reconecta:
+        tipo, datos = 'miembro.reconectado', {'usuario_id': str(usuario.id)}
+    else:
+        tipo, datos = 'miembro.ingreso', formatear_miembro(miembro, participacion, usuario.nombre_usuario)
+    EventoSalida.objects.create(agregado_id=party.id, version=party.version, tipo=tipo, creado_en=ahora, datos=datos)
+    transaction.on_commit(lambda: _avisar_conectados(party.id, tipo, datos, party.version))
 
     return estado_completo(party, usuario), 200
 
