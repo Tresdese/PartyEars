@@ -84,7 +84,7 @@ Códigos HTTP:
 | 401 | Sin autenticación válida | `TOKEN_INVALIDO`, `CREDENCIALES_INVALIDAS` |
 | 403 | Autenticado pero sin permiso | `SIN_PERMISO`, `NO_ES_ANFITRION`, `NO_ES_MIEMBRO`, `USUARIO_EXPULSADO`, `CUENTA_INACTIVA` |
 | 404 | No existe | `NO_ENCONTRADO`, `CODIGO_INVALIDO` |
-| 409 | Choca con el estado actual | `VERSION_OBSOLETA`, `PARTY_LLENA`, `YA_EN_OTRA_PARTY`, `IDEMPOTENCIA_CONFLICTO`, `ELEMENTO_NO_ACTUAL`, `DUPLICADO` |
+| 409 | Choca con el estado actual | `VERSION_OBSOLETA`, `PARTY_LLENA`, `YA_EN_OTRA_PARTY`, `IDEMPOTENCIA_CONFLICTO`, `ELEMENTO_NO_ACTUAL`, `ELEMENTO_NO_PENDIENTE`, `REPRODUCCION_EN_CURSO`, `COLA_VACIA`, `DUPLICADO` |
 | 410 | Ya no está disponible | `PARTY_FINALIZADA`, `CODIGO_EXPIRADO`, `AUDIO_NO_DISPONIBLE` |
 | 503 | Un servicio del que depende no responde | `SERVICIO_NO_DISPONIBLE` |
 
@@ -122,7 +122,7 @@ Corresponde a las tablas `operacion_confirmada` de `party` y `queue`. El registr
 ### 1.7 Versiones y operaciones obsoletas (RF-12, RF-23)
 
 - La party y cada cola tienen un entero `version` que sube con cada cambio confirmado. Toda respuesta y todo evento que describe una party o una cola incluye su `version`.
-- Las operaciones que dependen del estado que el usuario está viendo (reordenar, cambiar permisos, saltar) mandan `version_esperada`.
+- Las operaciones que dependen del estado que el usuario está viendo (reordenar, retirar, cambiar permisos) mandan `version_esperada`. La reproducción (5.3) usa `elemento_id` en su lugar.
 - Si no coincide con la actual: `409 VERSION_OBSOLETA` con `"detalles": {"version_actual": 18}`. El cliente recarga el estado y **no reintenta solo** (RF-21).
 
 ---
@@ -312,7 +312,7 @@ Errores: `404 CODIGO_INVALIDO`, `410 CODIGO_EXPIRADO`, `410 PARTY_FINALIZADA`, `
 
 ### 4.3 `GET /api/v1/party/parties/{party_id}` (RF-09)
 
-Estado completo. Solo miembros. Es la instantánea que el cliente pide al conectar o reconectar el WebSocket (7.5).
+Estado completo. Solo miembros: habilitado y con participación abierta, igual que en 7.2. Es la instantánea que el cliente pide al conectar o reconectar el WebSocket (7.5); `queue` también la usa para validar permisos (5.2). Errores: `403 NO_ES_MIEMBRO`, `404 NO_ENCONTRADO`, `410 PARTY_FINALIZADA`.
 
 ### 4.4 `PUT /api/v1/party/parties/{party_id}/miembros/{usuario_id}/permisos` (RF-17, RF-18)
 
@@ -418,6 +418,10 @@ Solo miembros. Agregar requiere ser anfitrión o tener `puede_aportar`; reordena
 
 `queue` conoce miembros, permisos y anfitrión por los eventos que publica `party` (RabbitMQ `party.eventos`); no llama a `party` en cada operación.
 
+`PENDIENTE (Darlington, después del MVP)`: mientras no exista el envío del outbox de `party` a RabbitMQ ni el consumidor en `queue`, `queue` consulta 4.3 con el token del usuario en cada operación. Mientras tanto, si `party` no responde, la cola compartida responde `503 SERVICIO_NO_DISPONIBLE`, y los errores de 4.3 (`403 NO_ES_MIEMBRO`, `404 NO_ENCONTRADO`, `410 PARTY_FINALIZADA`) llegan tal cual al cliente.
+
+La cola de una party se crea la primera vez que se consulta o se modifica.
+
 #### `GET /api/v1/queue/parties/{party_id}/cola`
 
 Estado de la cola compartida.
@@ -428,7 +432,7 @@ Estado de la cola compartida.
 { "recurso_audio_id": "uuid" }
 ```
 
-Se agrega al final. No inicia la reproducción aunque la cola esté vacía. La misma canción puede estar varias veces. Errores: `403 SIN_PERMISO`, `410 AUDIO_NO_DISPONIBLE`, `410 PARTY_FINALIZADA`.
+`201` con el estado de la cola. Se agrega al final. No inicia la reproducción aunque la cola esté vacía. La misma canción puede estar varias veces. Errores: `403 SIN_PERMISO`, `410 AUDIO_NO_DISPONIBLE`, `410 PARTY_FINALIZADA`.
 
 #### `PATCH /api/v1/queue/parties/{party_id}/cola/elementos/{elemento_id}` (RF-12)
 
@@ -436,7 +440,7 @@ Se agrega al final. No inicia la reproducción aunque la cola esté vacía. La m
 { "nueva_posicion": 1, "version_esperada": 31 }
 ```
 
-`nueva_posicion` cuenta desde 1 dentro de los pendientes. Solo se mueven pendientes; mover el actual o el historial da `409 ELEMENTO_NO_PENDIENTE`. Errores: `403 SIN_PERMISO`, `409 VERSION_OBSOLETA`.
+`nueva_posicion` cuenta desde 1 dentro de los pendientes; fuera de rango da `400 DATOS_INVALIDOS`. Solo se mueven pendientes; mover el actual o el historial da `409 ELEMENTO_NO_PENDIENTE`. Errores: `403 SIN_PERMISO`, `404 NO_ENCONTRADO`, `409 VERSION_OBSOLETA`.
 
 #### `DELETE /api/v1/queue/parties/{party_id}/cola/elementos/{elemento_id}?version_esperada=31` (RF-13)
 
@@ -449,7 +453,7 @@ Pasa el elemento a `retirada`. La confirmación al usuario la hace el cliente an
 Requiere `Idempotency-Key`.
 
 ```json
-{ "accion": "pausar", "elemento_id": "uuid", "posicion_ms": null, "version_esperada": 31 }
+{ "accion": "pausar", "elemento_id": "uuid", "posicion_ms": null }
 ```
 
 | `accion` | Quién | Efecto |
@@ -460,7 +464,10 @@ Requiere `Idempotency-Key`.
 | `buscar` | Anfitrión | Cambia a `posicion_ms` (obligatoria) |
 | `saltar` | Anfitrión o `puede_modificar_cola` | Marca la actual como `omitida` y empieza la siguiente; si no hay, se detiene |
 
-- `elemento_id` es el elemento que el usuario ve como actual. Si ya no es el actual: `409 ELEMENTO_NO_ACTUAL` y no se salta otro (RF-23).
+- `elemento_id` es el elemento que el usuario ve como actual; obligatorio salvo en `iniciar`. Si ya no es el actual: `409 ELEMENTO_NO_ACTUAL` y no se salta otro (RF-23). No se pide `version_esperada`: con ella, el anfitrión no podría pausar cada vez que alguien agrega una canción, y `elemento_id` ya evita saltar dos veces.
+- `iniciar` con una canción sonando da `409 REPRODUCCION_EN_CURSO`; con la cola sin pendientes, `409 COLA_VACIA`.
+- `iniciar`, `reanudar`, `buscar` (si está sonando) y el paso a la siguiente ponen `referencia_en` 1.5 s en el futuro: los clientes reciben el estado, se colocan en la posición y arrancan todos en ese instante (T-31).
+- `duracion_ms` va en `null` mientras `music` no exista (T-14); el cliente detecta el fin con su propio reproductor.
 - Un participante con `puede_modificar_cola` que intenta pausar recibe `403 NO_ES_ANFITRION` (RF-14).
 - Respuesta y evento `reproduccion.estado` (7.6):
 
@@ -492,7 +499,9 @@ si pausada:       posicion = posicion_base_ms
 
 Requiere `Idempotency-Key`. Lo manda el cliente cuando su audio llega al final. Avanza a la siguiente pendiente **una sola vez**: si el elemento ya no es el actual, responde `200` con el estado vigente sin hacer nada más.
 
-`PENDIENTE (Darlington, T-31 y T-34)`: en la party, ¿se acepta el aviso de cualquier miembro o solo del anfitrión? Propuesta: de cualquier miembro conectado, siempre que hayan pasado al menos `duracion_ms` - 2 s de reproducción según el servidor. Así la party no se atasca si el anfitrión se desconecta.
+Para el MVP solo lo acepta del anfitrión (otro miembro recibe `403 NO_ES_ANFITRION`): sin la duración de `music`, el servidor no puede distinguir un fin real de un miembro que salta canciones sin permiso.
+
+`PENDIENTE (Darlington, T-14)`: cuando `music` dé la duración, aceptar el aviso de cualquier miembro conectado, siempre que hayan pasado al menos `duracion_ms` - 2 s de reproducción según el servidor. Así la party no se atasca si el anfitrión se desconecta.
 
 ---
 
@@ -533,6 +542,8 @@ Cada servicio con eventos tiene su propio WebSocket por party. Si un servicio ca
 | streaming | `wss://<host>/ws/v1/streaming/parties/{party_id}/` | Canal de voz y señalización |
 
 La cola individual no usa WebSocket.
+
+Para el MVP, `queue` no tiene WebSocket propio: publica `cola.actualizada` y `reproduccion.estado` en el WebSocket de `party`, por el mismo Redis. El cliente abre una sola conexión para party y cola. En esos eventos, `version` es la de la **cola**, no la de la party: el cliente la compara con la instantánea de la cola (7.5). Desventaja: si `party` cae, la cola deja de avisar en vivo, igual que ya deja de validar permisos (5.2).
 
 `PENDIENTE (los tres)`: la alternativa es un único WebSocket en un servicio que reenvíe los eventos de todos. Es más simple para el cliente, pero si ese servicio cae, la party pierde todo el tiempo real. La propuesta es la de la tabla.
 
@@ -662,7 +673,7 @@ En `voz.senal` el cliente manda `para`; el servidor agrega `de` y solo lo reenv�
 | Nombres de usuario en `party` | 2.5 | Axel |
 | Audio con cabecera o URL firmada | 3.3 | Axel |
 | Vigencia del código de party | 4.1.1 | Mariana |
-| Quién puede avisar el fin de canción | 5.3 | Darlington |
+| Quién puede avisar el fin de canción (tras T-14) | 5.3 | Darlington |
 | Límite de desfase y corrección | 5.3 | Darlington |
 | Topología de voz y TURN | 6 | Mariana |
 | WebSocket por servicio o único | 7.1 | Los tres |
