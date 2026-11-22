@@ -122,6 +122,22 @@ void main() {
             expect(destino - esperada.inMilliseconds, inInclusiveRange(700, 900));
         });
 
+        test('con retraso del altavoz el reproductor va adelantado esa cantidad', () async {
+            final conRetraso = Sincronizador(reproductor: reproductor, reloj: RelojServidor(), abrirAudio: (_, _) async {},
+                                             periodo: const Duration(hours: 1), retraso: () => const Duration(milliseconds: 300));
+            addTearDown(conRetraso.cerrar);
+            final referencia = DateTime.now().toUtc().subtract(const Duration(seconds: 5));
+            await conRetraso.aplicar(estado('reproduciendo', referencia: referencia));
+            final esperada = DateTime.now().toUtc().difference(referencia);
+
+            final destino = int.parse(reproductor.llamadas.lastWhere((l) => l.startsWith('irA')).split(' ').last);
+            expect(destino - esperada.inMilliseconds, inInclusiveRange(250, 350));
+            // Sounding on time is within the limit: no correction.
+            reproductor.posicionActual = esperada + const Duration(milliseconds: 300);
+            await conRetraso.revisar();
+            expect(conRetraso.correcciones, 0);
+        });
+
         test('no salta si está dentro del límite', () async {
             final referencia = DateTime.now().toUtc().subtract(const Duration(seconds: 5));
             await sincronizador.aplicar(estado('reproduciendo', referencia: referencia));
