@@ -12,11 +12,7 @@ if (-not (Test-Path .venv)) {
     python -m venv .venv
 }
 .\.venv\Scripts\python.exe -m pip install -q -r requirements.txt
-# Checking the exit code instead of relying on ErrorActionPreference: it ignores native commands.
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-# Migrations by hand instead of on every start: the dev database is shared, so a branch's
-# unmerged migrations would reach everyone (README section 6).
-# 0.0.0.0 instead of 127.0.0.1: phones and other PCs on the network must reach the service.
 $env:DJANGO_SETTINGS_MODULE = "config.settings.$Servicio"
 .\.venv\Scripts\python.exe manage.py runserver "0.0.0.0:$($puertos[$Servicio])"
