@@ -1,0 +1,156 @@
+import uuid
+from unittest import IsolatedAsyncioTestCase
+
+from channels.db import database_sync_to_async
+from datetime import timedelta
+from django.test import override_settings
+from django.utils import timezone
+from types import SimpleNamespace
+
+from apps.parties.models import (AnfitrionParty, EventoSalida, InvitacionParty, MiembroParty,
+                                 ParticipacionParty, Party)
+from apps.parties.servicios import desconectar_participante, unirse_party
+
+from .utilidades import agregar_miembro, crear_party_en_bd, vaciar_tablas_party
+
+TIPOS = ('miembro.desconectado', 'miembro.reconectado', 'miembro.ingreso', 'party.finalizada')
+
+
+def leer_estado(party_id):
+    party = Party.objects.get(id=party_id)
+    return {
+        'version': party.version,
+        'finalizada_en': party.finalizada_en,
+        'participaciones': {p.usuario_id: (p.salida_en, p.motivo_salida) for p in party.participaciones.all()},
+        'miembros': {m.usuario_id: m.estado for m in party.miembros.all()},
+        'eventos': [(e.tipo, e.datos) for e in EventoSalida.objects.filter(agregado_id=party_id, tipo__in=TIPOS).order_by('version')],
+        'permisos': {m.usuario_id: (m.puede_aportar, m.puede_modificar_cola) for m in party.miembros.all()},
+    }
+
+
+def preparar_reingreso(party_id, usuario_id, anfitrion_id):
+    MiembroParty.objects.filter(party_id=party_id, usuario_id=usuario_id).update(puede_aportar=True, puede_modificar_cola=True)
+    InvitacionParty.objects.create(party_id=party_id, codigo='ABC123', creada_por=anfitrion_id, expira_en=timezone.now() + timedelta(hours=1))
+
+
+def envejecer_desconexion(party_id, usuario_id, segundos):
+    ahora = timezone.now()
+    ParticipacionParty.objects.filter(party_id=party_id, usuario_id=usuario_id).update(
+        entrada_en=ahora - timedelta(seconds=segundos + 60),
+        salida_en=ahora - timedelta(seconds=segundos))
+
+
+def reingresar(party_id, usuario_id):
+    usuario = SimpleNamespace(id=usuario_id, nombre_usuario='miembro')
+    return unirse_party(usuario, 'ABC123', uuid.uuid4())
+
+
+class DesconectarParticipanteTests(IsolatedAsyncioTestCase):
+
+    async def asyncSetUp(self):
+        ajustes = override_settings(CHANNEL_LAYERS={'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}})
+        ajustes.enable()
+        self.addCleanup(ajustes.disable)
+        self.anfitrion_id = uuid.uuid4()
+        self.party_id = await database_sync_to_async(crear_party_en_bd)(self.anfitrion_id)
+        self.miembro_id = uuid.uuid4()
+        await database_sync_to_async(agregar_miembro)(self.party_id, self.miembro_id)
+
+    async def asyncTearDown(self):
+        await database_sync_to_async(vaciar_tablas_party)()
+
+    async def leer(self):
+        return await database_sync_to_async(leer_estado)(self.party_id)
+
+    async def desconectar(self, usuario_id):
+        return await database_sync_to_async(desconectar_participante)(self.party_id, usuario_id)
+
+    async def test_cierra_la_participacion_con_motivo_desconexion_y_avisa(self):
+        antes = await self.leer()
+
+        self.assertTrue(await self.desconectar(self.miembro_id))
+
+        despues = await self.leer()
+        salida_en, motivo = despues['participaciones'][self.miembro_id]
+        self.assertIsNotNone(salida_en)
+        self.assertEqual(motivo, 'desconexion')
+        self.assertEqual(despues['eventos'], [('miembro.desconectado', {'usuario_id': str(self.miembro_id)})])
+        self.assertEqual(despues['version'], antes['version'] + 1)
+
+    async def test_conserva_la_membresia_y_la_party_sigue_activa(self):
+        await self.desconectar(self.miembro_id)
+
+        estado = await self.leer()
+        self.assertEqual(estado['miembros'][self.miembro_id], 'habilitado')
+        self.assertIsNone(estado['finalizada_en'])
+        self.assertIsNone(estado['participaciones'][self.anfitrion_id][0])
+
+    async def test_repetir_la_desconexion_no_hace_nada(self):
+        self.assertTrue(await self.desconectar(self.miembro_id))
+        despues = await self.leer()
+
+        self.assertFalse(await self.desconectar(self.miembro_id))
+
+        self.assertEqual(await self.leer(), despues)
+
+    async def test_quien_ya_salio_no_se_marca_como_desconectado(self):
+        await database_sync_to_async(ParticipacionParty.objects.filter(usuario_id=self.miembro_id).update)(salida_en=timezone.now(), motivo_salida='voluntaria')
+        antes = await self.leer()
+
+        self.assertFalse(await self.desconectar(self.miembro_id))
+
+        self.assertEqual(await self.leer(), antes)
+        self.assertEqual(antes['participaciones'][self.miembro_id][1], 'voluntaria')
+
+    async def test_si_se_desconecta_el_anfitrion_el_cargo_pasa_al_siguiente(self):
+        """RF-22, T-39: la sucesión también aplica cuando el servidor detecta la desconexión."""
+        self.assertTrue(await self.desconectar(self.anfitrion_id))
+
+        estado = await self.leer()
+        self.assertIsNone(estado['finalizada_en'])
+        self.assertEqual([tipo for tipo, _ in estado['eventos']], ['miembro.desconectado'])
+        anfitrion = await database_sync_to_async(
+            lambda: AnfitrionParty.objects.get(party_id=self.party_id).usuario_id)()
+        self.assertEqual(anfitrion, self.miembro_id)
+        self.assertEqual(estado['permisos'][self.miembro_id], (True, True))
+
+    async def test_la_ultima_desconexion_finaliza_la_party(self):
+        await self.desconectar(self.miembro_id)
+        await self.desconectar(self.anfitrion_id)
+
+        estado = await self.leer()
+        self.assertIsNotNone(estado['finalizada_en'])
+        self.assertEqual([tipo for tipo, _ in estado['eventos']], ['miembro.desconectado', 'miembro.desconectado', 'party.finalizada'])
+        self.assertEqual(estado['eventos'][-1][1]['motivo'], 'sin_conectados')
+
+    async def test_party_inexistente_o_finalizada_no_hace_nada(self):
+        self.assertFalse(await database_sync_to_async(desconectar_participante)(uuid.uuid4(), self.miembro_id))
+
+        await database_sync_to_async(Party.objects.filter(id=self.party_id).update)(finalizada_en=timezone.now())
+        self.assertFalse(await self.desconectar(self.miembro_id))
+        self.assertEqual((await self.leer())['eventos'], [])
+
+    async def test_volver_antes_de_60_segundos_conserva_permisos_y_avisa_reconectado(self):
+        await database_sync_to_async(preparar_reingreso)(self.party_id, self.miembro_id, self.anfitrion_id)
+        await self.desconectar(self.miembro_id)
+
+        estado_http, codigo = await database_sync_to_async(reingresar)(self.party_id, self.miembro_id)
+
+        self.assertEqual(codigo, 200)
+        miembro = next(m for m in estado_http['miembros'] if m['usuario_id'] == str(self.miembro_id))
+        self.assertTrue(miembro['conectado'])
+        estado = await self.leer()
+        self.assertEqual(estado['permisos'][self.miembro_id], (True, True))
+        self.assertEqual([tipo for tipo, _ in estado['eventos']], ['miembro.desconectado', 'miembro.reconectado'])
+        self.assertEqual(estado['eventos'][-1][1], {'usuario_id': str(self.miembro_id)})
+
+    async def test_volver_despues_de_60_segundos_reinicia_permisos_y_entra_como_oyente(self):
+        await database_sync_to_async(preparar_reingreso)(self.party_id, self.miembro_id, self.anfitrion_id)
+        await self.desconectar(self.miembro_id)
+        await database_sync_to_async(envejecer_desconexion)(self.party_id, self.miembro_id, 61)
+
+        await database_sync_to_async(reingresar)(self.party_id, self.miembro_id)
+
+        estado = await self.leer()
+        self.assertEqual(estado['permisos'][self.miembro_id], (False, False))
+        self.assertEqual([tipo for tipo, _ in estado['eventos']], ['miembro.desconectado', 'miembro.ingreso'])

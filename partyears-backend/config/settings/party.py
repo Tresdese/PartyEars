@@ -11,6 +11,8 @@ DATABASES = database('party')
 
 WS_TIEMPO_AUTENTICAR = 5
 
+WS_TIEMPO_SIN_LATIDO = 15
+
 PARTY_VIGENCIA_CODIGO = timedelta(hours=24)
 
 REST_FRAMEWORK = {

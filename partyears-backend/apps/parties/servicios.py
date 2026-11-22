@@ -30,6 +30,7 @@ RECONEXION_CONSERVA_PERMISOS = timedelta(seconds=60)
 CIERRE_NO_ES_MIEMBRO = 4003
 CIERRE_PARTY_NO_EXISTE = 4004
 CIERRE_PARTY_FINALIZADA = 4010
+CIERRE_SIN_LATIDO = 4009
 
 def fecha_iso(valor):
     if valor is None:
@@ -168,10 +169,13 @@ def unirse_party(usuario, codigo, clave):
     if party.participaciones.filter(salida_en__isnull=True).count() >= party.capacidad:
         raise ErrorApi(409, 'PARTY_LLENA', 'La party ya tiene el máximo de personas conectadas.')
 
+    reconecta = False
     if miembro is None:
         miembro = MiembroParty.objects.create(party=party, usuario_id=usuario.id,
                                               incorporado_en=ahora)
-    elif not _puede_conservar_permisos(party, usuario.id, ahora):
+    elif _puede_conservar_permisos(party, usuario.id, ahora):
+        reconecta = True
+    else:
         MiembroParty.objects.filter(id=miembro.id).update(puede_aportar=False,
                                                           puede_modificar_cola=False)
         miembro.puede_aportar = miembro.puede_modificar_cola = False
@@ -190,11 +194,14 @@ def unirse_party(usuario, codigo, clave):
     Party.objects.filter(id=party.id).update(version=party.version)
 
     _confirmar_operacion(party, usuario.id, clave, OPERACION_UNIRSE, solicitud, 200, ahora)
-    datos = formatear_miembro(miembro, participacion, usuario.nombre_usuario)
-    EventoSalida.objects.create(agregado_id=party.id, version=party.version, tipo='miembro.ingreso',
+    if reconecta:
+        tipo, datos = 'miembro.reconectado', {'usuario_id': str(usuario.id)}
+    else:
+        tipo = 'miembro.ingreso'
+        datos = formatear_miembro(miembro, participacion, usuario.nombre_usuario)
+    EventoSalida.objects.create(agregado_id=party.id, version=party.version, tipo=tipo,
                                 creado_en=ahora, datos=datos)
-    transaction.on_commit(
-        lambda: _avisar_conectados(party.id, 'miembro.ingreso', datos, party.version))
+    transaction.on_commit(lambda: _avisar_conectados(party.id, tipo, datos, party.version))
 
     return estado_completo(party, usuario), 200
 
@@ -436,8 +443,7 @@ def _asignar_anfitrion(party, anterior_id, miembro, motivo, ahora, pendientes):
 
 
 def finalizar_sin_conectados(party, ahora, pendientes):
-    """RF-20, CU-16 FA-0.1: cierre automático. T-38 lo usa cuando la última desconexión
-    detectada deja la party vacía. Quien llama tiene la party bloqueada."""
+    """RF-20, CU-16 FA-0.1: cierre automático. Quien llama tiene la party bloqueada."""
     if not conectados_habilitados(party).exists():
         _finalizar(party, 'sin_conectados', ahora, pendientes)
 
@@ -496,6 +502,42 @@ def salir_party(usuario, party_id, clave):
     _confirmar_operacion(party, usuario.id, clave, OPERACION_SALIR, solicitud, 204, ahora)
     _guardar_version_y_avisar(party, pendientes)
     return None, 204
+
+
+@transaction.atomic
+def desconectar_participante(party_id, usuario_id):
+    """RF-21, RNF-07. El servidor dejó de saber de la persona: cierra su participación.
+
+    Queda cerrada con motivo `desconexion`; los 60 s para conservar los permisos se cuentan
+    desde esa fecha cuando vuelve por `unirse` (_puede_conservar_permisos). No usa
+    Idempotency-Key porque no es una operación del cliente. Devuelve True si cerró una
+    participación y False si no había nada que cerrar (ya salió, la expulsaron o la party
+    terminó), así `salir` y `finalizar` pueden cerrar sockets sin duplicar avisos.
+    """
+    party = Party.objects.select_for_update().filter(id=party_id).first()
+    if party is None or party.finalizada_en is not None:
+        return False
+    participacion = party.participaciones.filter(usuario_id=usuario_id,
+                                                 salida_en__isnull=True).first()
+    if participacion is None:
+        return False
+
+    ahora = timezone.now()
+    participacion.salida_en = ahora
+    participacion.motivo_salida = 'desconexion'
+    participacion.save(update_fields=['salida_en', 'motivo_salida'])
+
+    pendientes = []
+    _registrar_evento(party, 'miembro.desconectado', {'usuario_id': str(usuario_id)}, ahora,
+                      pendientes)
+    if not conectados_habilitados(party).exists():
+        _finalizar(party, 'sin_conectados', ahora, pendientes)
+    else:
+        anfitrion = AnfitrionParty.objects.get(party=party)
+        if str(anfitrion.usuario_id) == str(usuario_id):
+            aplicar_sucesion(party, anfitrion, ahora, pendientes)
+    _guardar_version_y_avisar(party, pendientes)
+    return True
 
 
 @transaction.atomic

@@ -310,7 +310,7 @@ Requiere `Idempotency-Key`.
 { "codigo": "K7Q2ZP" }
 ```
 
-`200`: estado completo de la party. Entra como oyente (sin permisos), salvo reconexión dentro de los 60 s, que conserva los permisos vigentes (RF-21).
+`200`: estado completo de la party. Entra como oyente (sin permisos), salvo reconexión dentro de los 60 s, que conserva los permisos vigentes (RF-21). En ese caso los miembros reciben `miembro.reconectado` en lugar de `miembro.ingreso`.
 
 Errores: `404 CODIGO_INVALIDO`, `410 CODIGO_EXPIRADO`, `410 PARTY_FINALIZADA`, `403 USUARIO_EXPULSADO`, `409 PARTY_LLENA`, `409 YA_EN_OTRA_PARTY`.
 
@@ -575,6 +575,7 @@ Cierres del servidor (código de cierre WebSocket):
 | 4004 | La party no existe |
 | 4010 | La party finalizó |
 | 4008 | No se autenticó a tiempo |
+| 4009 | El servidor no recibió ningún mensaje válido en 15 s (desconexión detectada) |
 
 Para `party`, "miembro" significa habilitado **y con una participación abierta**: quien salió de la party o fue expulsado recibe 4003 aunque conserve su registro de miembro. Para volver, primero `POST .../unirse` (4.2) y después se conecta el WebSocket.
 
@@ -604,9 +605,9 @@ Todos los mensajes, en ambas direcciones:
 Solo en el WebSocket de `party`, que es el que define la presencia:
 
 - El cliente manda `{"tipo": "latido"}` cada **5 s**. El servidor responde `{"tipo": "latido.ok"}`. Va sin el sobre de 7.3: no cambia estado ni se repite. Sin autenticar, cierre `4001`.
-- El servidor marca al miembro desconectado tras **15 s** sin un mensaje válido suyo y avisa a los demás (`miembro.desconectado`).
+- El servidor detecta la desconexión cuando pasan **15 s** sin un mensaje válido suyo, contados desde su último mensaje aunque su socket ya se haya cerrado: si en ese tiempo vuelve a autenticarse por otro socket, no pasa nada (renovar el token o un corte breve no lo sacan). Cierra su participación con motivo `desconexion`, cierra el socket con `4009` si seguía abierto y avisa a los demás con `miembro.desconectado`. Si la persona tiene otro socket abierto en la misma party, no se marca desconectada. Si era el anfitrión, se aplica la sucesión igual que al salir (4.1, RF-22); si no queda nadie conectado y habilitado, la party finaliza.
 - El cliente se considera desconectado tras **15 s** sin recibir nada del servidor: lo muestra, deshabilita las modificaciones y reintenta conectar.
-- La pertenencia y los permisos se conservan **60 s** desde que el servidor detecta la desconexión (`miembro.reconectado` si vuelve a tiempo).
+- La pertenencia y los permisos se conservan **60 s** desde que el servidor detecta la desconexión. Para volver, el cliente llama a `POST .../unirse` (4.2) y después conecta el WebSocket. Si lo hace dentro de los 60 s conserva sus permisos y los demás reciben `miembro.reconectado`; si no, entra como oyente y reciben `miembro.ingreso`.
 
 Medición del desfase de reloj, en el WebSocket de `party` (sincronización, T-31). Va en `party` porque es el único WebSocket que mantiene la presencia y porque queue todavía no tiene WebSocket; si la decisión de 7.1 cambia, se mueve. Solo para clientes autenticados (si no, cierre `4001`):
 
@@ -625,6 +626,7 @@ Tiempos en milisegundos desde 1970. Con `t_recibido` = hora local al recibir el 
 3. Aplicar los eventos con `version` mayor que la de la instantánea; descartar los de versión menor o igual.
 4. Si llega un evento con un salto de versión (por ejemplo, de 14 a 16), volver a pedir la instantánea.
 5. Al reconectar, repetir desde el paso 1. Las acciones que el usuario intentó durante el corte no se reenvían solas (RF-21).
+6. Si el servidor cerró con 4009 o la autenticación responde 4003, la participación ya se cerró: hay que llamar antes a POST .../unirse (4.2).
 
 ### 7.6 Eventos
 
