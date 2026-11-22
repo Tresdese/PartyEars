@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from django.utils import timezone
 
-from apps.parties.models import EventoSalida, MiembroParty, Party
+from apps.parties.models import EventoSalida, MiembroParty, ParticipacionParty, Party
 from .utilidades import PruebasBase, agregar_miembro, hacer_token
 
 
@@ -86,6 +86,22 @@ class PermisosTests(PruebasBase):
         clave = uuid.uuid4()
         self.cambiar(True, False, clave=clave)
         self.verificar_error(self.cambiar(False, True, clave=clave), 409, 'IDEMPOTENCIA_CONFLICTO')
+
+    def desconectar_miembro(self):
+        ParticipacionParty.objects.filter(usuario_id=self.miembro_id).update(
+            salida_en=timezone.now(), motivo_salida='desconexion')
+
+    def test_no_se_otorga_a_quien_no_esta_conectado(self):
+        self.desconectar_miembro()
+        self.verificar_error(self.cambiar(True, False), 409, 'PARTICIPANTE_NO_CONECTADO')
+        self.assertEqual(self.permisos(), (False, False))
+
+    def test_si_se_retira_a_quien_no_esta_conectado(self):
+        version = self.cambiar(True, True).json()['version']
+        self.desconectar_miembro()
+        respuesta = self.cambiar(False, True, version=version)
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(self.permisos(), (False, True))
 
     def test_quien_no_esta_en_la_party(self):
         self.verificar_error(self.cambiar(miembro_id=uuid.uuid4()), 404, 'NO_ENCONTRADO')

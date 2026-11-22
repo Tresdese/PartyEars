@@ -317,6 +317,15 @@ def cambiar_permisos(usuario, party_id, miembro_id, puede_aportar, puede_modific
         raise ErrorApi(404, 'NO_ENCONTRADO', 'Esa persona no está en la party.')
     if miembro.usuario_id == usuario.id:
         raise ErrorApi(400, 'DATOS_INVALIDOS', 'El anfitrión siempre tiene todos los permisos.')
+    # Granting needs the member connected (CU-13 FA-4.1); revoking does not (CU-14 FA-5.1), so
+    # a host can still take permissions away from someone who dropped.
+    otorga = ((puede_aportar and not miembro.puede_aportar)
+              or (puede_modificar_cola and not miembro.puede_modificar_cola))
+    esta_conectado = party.participaciones.filter(usuario_id=miembro.usuario_id,
+                                                  salida_en__isnull=True).exists()
+    if otorga and not esta_conectado:
+        raise ErrorApi(409, 'PARTICIPANTE_NO_CONECTADO',
+                       'El participante ya no está conectado a la party.')
 
     ahora = timezone.now()
     miembro.puede_aportar = puede_aportar
