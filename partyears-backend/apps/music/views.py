@@ -1,6 +1,6 @@
 import re
 
-from django.http import FileResponse, HttpResponse
+from django.http import FileResponse, HttpResponse, StreamingHttpResponse
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -9,6 +9,20 @@ from .errores import ErrorApi
 from .servicios import buscar_canciones, obtener_detalle_recurso, resolver_archivo_recurso
 
 _PATRON_RANGE = re.compile(r'^bytes=(\d*)-(\d*)$')
+_TROZO = 64 * 1024
+
+
+def _leer_trozos(ruta, inicio, longitud):
+    # Chunks instead of reading the whole range: players ask for "bytes=N-", the rest of a
+    # 30-50 MB FLAC, and 20 phones at once would hold over a gigabyte in memory.
+    with open(ruta, 'rb') as archivo:
+        archivo.seek(inicio)
+        while longitud > 0:
+            trozo = archivo.read(min(_TROZO, longitud))
+            if not trozo:
+                return
+            longitud -= len(trozo)
+            yield trozo
 
 
 class CancionesView(APIView):
@@ -67,11 +81,8 @@ class RecursoAudioView(APIView):
         fin = min(fin, tamano - 1)
         longitud = fin - inicio + 1
 
-        with open(ruta, 'rb') as f:
-            f.seek(inicio)
-            fragmento = f.read(longitud)
-
-        respuesta = HttpResponse(fragmento, status=206, content_type=recurso.mime_type)
+        respuesta = StreamingHttpResponse(_leer_trozos(ruta, inicio, longitud), status=206,
+                                          content_type=recurso.mime_type)
         respuesta['Content-Range'] = f'bytes {inicio}-{fin}/{tamano}'
         respuesta['Content-Length'] = str(longitud)
         respuesta['Accept-Ranges'] = 'bytes'

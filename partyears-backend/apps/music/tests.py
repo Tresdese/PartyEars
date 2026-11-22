@@ -115,4 +115,13 @@ class CatalogoMusicaTests(TestCase):
             self.assertEqual(resp_audio.status_code, 206)
             self.assertEqual(resp_audio['Accept-Ranges'], 'bytes')
             self.assertTrue(resp_audio['Content-Range'].startswith('bytes 0-1023/'))
-            self.assertEqual(len(resp_audio.content), 1024)
+            self.assertEqual(len(b''.join(resp_audio.streaming_content)), 1024)
+
+            # A range in the middle returns exactly those bytes, read in chunks
+            completo = b''.join(self.cliente.get(
+                f'/api/v1/music/recursos/{recurso_id}/audio').streaming_content)
+            resp_medio = self.cliente.get(f'/api/v1/music/recursos/{recurso_id}/audio',
+                                          HTTP_RANGE='bytes=1000-')
+            self.assertEqual(resp_medio.status_code, 206)
+            self.assertEqual(b''.join(resp_medio.streaming_content), completo[1000:])
+            self.assertEqual(resp_medio['Content-Length'], str(len(completo) - 1000))
