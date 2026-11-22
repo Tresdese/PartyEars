@@ -11,6 +11,9 @@ if 'django.contrib.admin' in settings.INSTALLED_APPS:
 if 'apps.users' in settings.INSTALLED_APPS:
     urlpatterns.append(path('', include('apps.users.urls')))
 
+if 'apps.music' in settings.INSTALLED_APPS:
+    urlpatterns.append(path('', include('apps.music.urls')))
+
 if 'apps.parties' in settings.INSTALLED_APPS:
     urlpatterns.append(path('', include('apps.parties.urls')))
 
