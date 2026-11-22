@@ -11,7 +11,19 @@ class Red {
     static late Red instancia;
 
     final ApiClient api;
-    final ApiConfig config;
+    ApiConfig config;
+
+    /// Host (IP o nombre) de la máquina que corre el backend en este momento.
+    String get host => Uri.parse(config.urlBase(Servicio.auth)).host;
+
+    /// The backend moves between machines (the professor picks whose PC runs it), so the host
+    /// is chosen in the app and saved instead of fixed when compiling (PARTYEARS_HOST).
+    Future<void> cambiarServidor(String host) async {
+        config = ApiConfig.desdeHost(host.trim());
+        final cliente = api;
+        if (cliente is HttpApiClient) cliente.config = config;
+        await config.guardar();
+    }
 
     static Future<void> iniciar() async {
         final config = await ApiConfig.cargar();
