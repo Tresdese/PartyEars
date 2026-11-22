@@ -3,7 +3,10 @@ import uuid
 from io import StringIO
 from types import SimpleNamespace
 
+from unittest.mock import patch
+
 from django.core.management import call_command
+from django.db import ProgrammingError
 from django.test import TestCase
 
 from apps.logs.management.commands.consumir_eventos import al_recibir
@@ -98,6 +101,15 @@ class ConsumirTests(TestCase):
         canal = self.recibir(json.dumps(evento).encode(), etiqueta=2)
         self.assertEqual(canal.confirmados, [2])
         self.assertEqual(EventoLog.objects.count(), 1)
+
+    def test_si_falla_la_base_no_confirma_y_la_falla_sube_para_reintentar(self):
+        with patch('apps.logs.management.commands.consumir_eventos.guardar',
+                   side_effect=ProgrammingError('no existe logs.evento_log')), \
+                self.assertRaises(ProgrammingError):
+            canal = CanalFalso()
+            al_recibir(canal, SimpleNamespace(delivery_tag=1), SimpleNamespace(message_id='m'),
+                       json.dumps(sobre()).encode())
+        self.assertEqual((canal.confirmados, canal.rechazados), ([], []))
 
     def test_un_mensaje_invalido_se_descarta_sin_reencolar(self):
         with self.assertLogs('apps.logs.management.commands.consumir_eventos'):

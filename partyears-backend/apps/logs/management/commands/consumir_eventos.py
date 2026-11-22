@@ -1,6 +1,5 @@
 import json
 import logging
-import time
 
 import pika
 from django.conf import settings
@@ -8,6 +7,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import DataError, IntegrityError
 
 from apps.logs.registro import guardar
+from apps.mensajeria.reintentos import FALLAS_RECUPERABLES, esperar_y_reintentar
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,7 @@ class Command(BaseCommand):
         if not settings.RABBITMQ_URL:
             raise CommandError('Falta LOGS_RABBITMQ_URL en .env (ver .env.example).')
         while True:
+            conexion = None
             try:
                 conexion = pika.BlockingConnection(pika.URLParameters(settings.RABBITMQ_URL))
                 canal = conexion.channel()
@@ -43,6 +44,5 @@ class Command(BaseCommand):
                     canal.basic_consume(cola, al_recibir)
                 self.stdout.write(f'Consumiendo {", ".join(COLAS)}')
                 canal.start_consuming()
-            except pika.exceptions.AMQPError:
-                logger.exception('Se perdió la conexión con RabbitMQ; reintento en 5 s')
-                time.sleep(5)
+            except FALLAS_RECUPERABLES:
+                esperar_y_reintentar(conexion)
