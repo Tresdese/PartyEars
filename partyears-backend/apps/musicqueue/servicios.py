@@ -11,6 +11,7 @@ from django.utils import timezone
 from redis.exceptions import RedisError
 
 from apps.parties.errores import ErrorApi
+from apps.mensajeria.publicador import TIPO_OPERACION, datos_operacion
 from apps.parties.eventos import publicar
 from .models import Cola, ElementoCola, EventoSalida, OperacionConfirmada
 
@@ -156,6 +157,20 @@ def _registrar_operacion(cola, usuario_id, clave, operacion, solicitud, codigo_h
         codigo_respuesta=codigo_http, resultado={'cola_id': str(cola.id), 'version': cola.version},
         confirmada_en=ahora,
     )
+    # Outbox only instead of _emitir: this copy is for logs (RF-34), not for the clients.
+    EventoSalida.objects.create(
+        agregado_id=cola.id, version=cola.version, tipo=TIPO_OPERACION, creado_en=ahora,
+        datos=datos_operacion(usuario_id, cola.party_id, operacion, codigo_http, clave=clave))
+
+
+def registrar_rechazo(actor_id, party_id, operacion, error, clave):
+    """RF-34: deja en el outbox una operación rechazada, después de deshacer sus cambios."""
+    cola = Cola.objects.filter(party_id=party_id).first()
+    if cola is None:
+        return
+    EventoSalida.objects.create(
+        agregado_id=cola.id, version=cola.version, tipo=TIPO_OPERACION,
+        datos=datos_operacion(actor_id, party_id, operacion, error.estado, error.codigo, clave))
 
 
 def _avisar_en_vivo(evento, party_id):
