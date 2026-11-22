@@ -594,7 +594,7 @@ Todos los mensajes, en ambas direcciones:
 
 Solo en el WebSocket de `party`, que es el que define la presencia:
 
-- El cliente manda `{"tipo": "latido"}` cada **5 s**. El servidor responde `{"tipo": "latido.ok"}`.
+- El cliente manda `{"tipo": "latido"}` cada **5 s**. El servidor responde `{"tipo": "latido.ok"}`. Va sin el sobre de 7.3: no cambia estado ni se repite. Sin autenticar, cierre `4001`.
 - El servidor marca al miembro desconectado tras **15 s** sin un mensaje válido suyo y avisa a los demás (`miembro.desconectado`).
 - El cliente se considera desconectado tras **15 s** sin recibir nada del servidor: lo muestra, deshabilita las modificaciones y reintenta conectar.
 - La pertenencia y los permisos se conservan **60 s** desde que el servidor detecta la desconexión (`miembro.reconectado` si vuelve a tiempo).

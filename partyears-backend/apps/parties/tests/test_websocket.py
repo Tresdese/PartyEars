@@ -220,7 +220,7 @@ class WebSocketPartyTests(IsolatedAsyncioTestCase):
 
     async def test_autenticado_que_manda_otro_mensaje_no_es_expulsado(self):
         cliente = await self.conectar_autenticado()
-        await cliente.send_json_to({'tipo': 'latido'})
+        await cliente.send_json_to({'tipo': 'tipo.desconocido'})
         await publicar(self.party_id, 'miembro.unido', {})
         evento = await cliente.receive_json_from(timeout=1)
         self.assertEqual(evento['tipo'], 'miembro.unido')
@@ -289,6 +289,16 @@ class WebSocketPartyTests(IsolatedAsyncioTestCase):
         self.assertEqual(respuesta['datos']['t_cliente'], 123)
         self.assertGreaterEqual(respuesta['datos']['t_servidor'], antes)
         self.assertLessEqual(respuesta['datos']['t_servidor'], time.time_ns() // 1_000_000)
+
+    async def test_latido_responde_latido_ok(self):
+        cliente = await self.conectar_autenticado()
+        await cliente.send_json_to({'tipo': 'latido'})
+        self.assertEqual(await cliente.receive_json_from(timeout=1), {'tipo': 'latido.ok'})
+
+    async def test_latido_sin_autenticar_cierra_4001(self):
+        cliente = await self.conectar()
+        await cliente.send_json_to({'tipo': 'latido'})
+        self.assertEqual(await self.codigo_de_cierre(cliente), 4001)
 
     async def test_reloj_ping_sin_autenticar_cierra_4001(self):
         cliente = await self.conectar()
