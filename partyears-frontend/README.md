@@ -196,6 +196,15 @@ flutter test integration_test/reproductor_test.dart -d linux
 
 En Windows, cambia `-d linux` por `-d windows`.
 
+La prueba de punta a punta de la party (T-55) usa los servicios reales: levanta `party` (8003) y `queue` (8004), deja libre el puerto 8002 (la prueba lo ocupa con un `music` falso) y pasa dos tokens de usuarios distintos firmados con la clave de desarrollo. Cada corrida necesita usuarios nuevos, porque un usuario solo puede estar en una party a la vez:
+
+```bash
+flutter test integration_test/party_e2e_test.dart -d linux \
+  --dart-define=TOKEN_ANFITRION=<jwt> --dart-define=TOKEN_MIEMBRO=<jwt>
+```
+
+Sin los tokens, la prueba se omite.
+
 ### Durante la ejecución
 
 - En la terminal donde corre `flutter run`, presiona **`r`** para **Hot Reload**.

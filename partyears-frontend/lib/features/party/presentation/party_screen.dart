@@ -4,6 +4,8 @@ import '../../../core/network/api_exception.dart';
 import '../../../core/widgets/common.dart';
 import '../../queue/presentation/queue_screen.dart';
 import '../../voice/presentation/voice_screen.dart';
+import '../data/party_models.dart';
+import 'party_en_curso.dart';
 
 class PartyScreen extends StatefulWidget {
     const PartyScreen({
@@ -11,9 +13,15 @@ class PartyScreen extends StatefulWidget {
         required this.partyCode,
         required this.onCreate,
         required this.onLeave,
+        this.party,
+        this.onJoin,
     });
 
     final String? partyCode;
+
+    /// La party completa cuando el usuario está dentro; sin ella solo se muestra el código.
+    final PartyActual? party;
+    final Future<void> Function(String codigo, {String? clave})? onJoin;
 
     final Future<void> Function(String nombre, {String? clave}) onCreate;
     final VoidCallback onLeave;
@@ -34,6 +42,10 @@ class _PartyScreenState extends State<PartyScreen> {
     String? _claveReintento;
     String? _nombreReintento;
 
+    bool _uniendose = false;
+    String? _claveUnirse;
+    String? _codigoReintento;
+
     @override
     void dispose() {
         _codeController.dispose();
@@ -45,9 +57,35 @@ class _PartyScreenState extends State<PartyScreen> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     }
 
-    void _join() {
+    Future<void> _join() async {
         final code = _codeController.text.trim().toUpperCase();
-        _showMessage(_codeFormat.hasMatch(code) ? 'Unirse requiere el backend' : 'Ingresa un código válido de seis caracteres');
+        final onJoin = widget.onJoin;
+
+        if (!_codeFormat.hasMatch(code)) {
+            _showMessage('Ingresa un código válido de seis caracteres');
+            return;
+        }
+        if (onJoin == null) {
+            _showMessage('Unirse requiere el backend');
+            return;
+        }
+
+        setState(() => _uniendose = true);
+        // Same key on a retry after a network failure (contract 1.6), like creating a party.
+        final clave = code == _codigoReintento ? _claveUnirse : null;
+
+        try {
+            await onJoin(code, clave: clave);
+            _claveUnirse = null;
+            _codigoReintento = null;
+        } on ApiException catch (e) {
+            if (!mounted) return;
+            _claveUnirse = e.esDeRed ? e.idempotencyKey : null;
+            _codigoReintento = e.esDeRed ? code : null;
+            _showMessage(e.mensaje);
+        } finally {
+            if (mounted) setState(() => _uniendose = false);
+        }
     }
 
     Future<void> _crear() async {
@@ -85,6 +123,11 @@ class _PartyScreenState extends State<PartyScreen> {
 
     @override
     Widget build(BuildContext context) {
+        final party = widget.party;
+        if (party != null) {
+            return PartyEnCurso(key: ValueKey(party.id), party: party, onLeave: widget.onLeave);
+        }
+
         final code = widget.partyCode;
 
         return ListView(
@@ -135,8 +178,8 @@ class _PartyScreenState extends State<PartyScreen> {
             onSubmitted: (_) => _join(),
         ),
         OutlinedButton(
-            onPressed: _join, 
-            child: const Text('Unirse a una Party (demo)'),
+            onPressed: _uniendose ? null : _join,
+            child: const Text('Unirse a una Party'),
         ),
     ];
 

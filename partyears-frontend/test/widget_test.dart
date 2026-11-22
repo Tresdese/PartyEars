@@ -7,6 +7,9 @@ import 'package:partyears_frontend/core/network/api_exception.dart';
 import 'package:partyears_frontend/features/party/data/party_models.dart';
 import 'package:partyears_frontend/features/party/data/party_service.dart';
 import 'package:partyears_frontend/features/party/presentation/party_screen.dart';
+import 'package:partyears_frontend/features/party/sesion_party.dart';
+
+import 'party/falsos.dart';
 
 void _useDesktopSize(WidgetTester tester) {
     tester.view.physicalSize = const Size(1440, 900);
@@ -33,11 +36,18 @@ class _PartyFalso implements PartyService {
             version: 1,
             anfitrionId: 'u1',
         );
+
+    @override
+    Future<PartyActual> unirse(String codigo, {String? clave}) => crear('Unida');
+
+    @override
+    Future<PartyActual> consultar(String partyId) => crear('Consultada');
 }
 
 void main() {
     setUpAll(() {
         PartyService.fabrica = () => _PartyFalso();
+        SesionParty.fabrica = sesionFalsa;
     });
 
     group('Pruebas de PartyEars', () {
@@ -205,7 +215,7 @@ void main() {
                 await tester.tap(find.text('Party'));
                 await tester.pumpAndSettle();
                 await tester.enterText(find.byType(TextField).last, 'AB-12');
-                await tester.tap(find.text('Unirse a una Party (demo)'));
+                await tester.tap(find.text('Unirse a una Party'));
                 await tester.pump();
                 expect(
                     find.text('Ingresa un código válido de seis caracteres'),
