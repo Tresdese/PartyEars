@@ -482,6 +482,37 @@ def salir_party(usuario, party_id, clave):
 
 
 @transaction.atomic
+def desconectar_participante(party_id, usuario_id):
+    """RF-21, RNF-07. El servidor dejó de saber de la persona: cierra su participación.
+
+    Queda cerrada con motivo `desconexion`; los 60 s para conservar los permisos se cuentan
+    desde esa fecha cuando vuelve por `unirse` (_puede_conservar_permisos). No usa
+    Idempotency-Key porque no es una operación del cliente. Devuelve True si cerró una
+    participación y False si no había nada que cerrar (ya salió, la expulsaron o la party
+    terminó), así `salir` y `finalizar` pueden cerrar sockets sin duplicar avisos.
+    """
+    party = Party.objects.select_for_update().filter(id=party_id).first()
+    if party is None or party.finalizada_en is not None:
+        return False
+    participacion = party.participaciones.filter(usuario_id=usuario_id, salida_en__isnull=True).first()
+    if participacion is None:
+        return False
+
+    ahora = timezone.now()
+    participacion.salida_en = ahora
+    participacion.motivo_salida = 'desconexion'
+    participacion.save(update_fields=['salida_en', 'motivo_salida'])
+
+    pendientes = []
+    _registrar_evento(party, 'miembro.desconectado', {'usuario_id': str(usuario_id)}, ahora, pendientes)
+    # TODO(T-39): si era el anfitrión y quedan candidatos, aplicar_sucesion(party, anfitrion,
+    # ahora, pendientes) va aquí, antes de finalizar_sin_conectados.
+    finalizar_sin_conectados(party, ahora, pendientes)
+    _guardar_version_y_avisar(party, pendientes)
+    return True
+
+
+@transaction.atomic
 def finalizar_party(usuario, party_id, clave):
     """RF-18, RF-20. Devuelve (None, 204)."""
     _bloquear_clave(usuario.id, clave)
