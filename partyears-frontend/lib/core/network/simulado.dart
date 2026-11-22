@@ -102,6 +102,15 @@ class MockApiClient implements ApiClient {
                 throw const ApiException(codigo: 'CODIGO_INVALIDO', mensaje: 'No existe una party con ese código.', estadoHttp: 404,);
         }
     
+        // T-55: the party screen asks for the snapshot and the shared queue when it connects.
+        final consulta = RegExp(r'^GET party/parties/([^/]+)$').firstMatch(operacion);
+
+        if (consulta != null && _party != null && _party!['id'] == consulta.group(1)) return _party;
+
+        if (RegExp(r'^GET queue/parties/([^/]+)/cola$').hasMatch(operacion)) {
+            return {'id': 'cola-simulada', 'modalidad': 'compartida', 'version': 0, 'actual': null, 'pendientes': <Object>[]};
+        }
+
         final cierre = RegExp(r'^(POST) party/parties/([^/]+)/(salir|finalizar)$').firstMatch(operacion);
         
         if (cierre != null) {

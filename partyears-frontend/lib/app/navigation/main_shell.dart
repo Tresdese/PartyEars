@@ -7,6 +7,7 @@ import '../../core/widgets/common.dart';
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/home/presentation/home_screen.dart';
 import '../../features/music/presentation/music_screen.dart';
+import '../../features/party/data/party_models.dart';
 import '../../features/party/data/party_service.dart';
 import '../../features/party/presentation/party_screen.dart';
 import '../../features/profile/presentation/profile_screen.dart';
@@ -21,7 +22,11 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
     int _selectedIndex = 0;
 
-    String? _partyCode;
+    PartyActual? _party;
+
+    // Members get no code from the server (contract 4); the screens that only show the code
+    // keep using it, and "in a party" is decided by _party.
+    String? get _partyCode => _party?.codigo;
 
     late final PartyService _partyService = PartyService.fabrica();
 
@@ -35,9 +40,9 @@ class _MainShellState extends State<MainShell> {
         try {
             final party = await _partyService.actual();
 
-            if (!mounted || party?.codigo == null) return;
+            if (!mounted || party == null) return;
 
-            setState(() => _partyCode = party!.codigo);
+            setState(() => _party = party);
         } on ApiException {
         // Sin sesión o sin conexión: se queda en "sin party".
         }
@@ -48,7 +53,15 @@ class _MainShellState extends State<MainShell> {
 
         if (!mounted) return;
 
-        setState(() => _partyCode = party.codigo);
+        setState(() => _party = party);
+    }
+
+    Future<void> _unirseParty(String codigo, {String? clave}) async {
+        final party = await _partyService.unirse(codigo, clave: clave);
+
+        if (!mounted) return;
+
+        setState(() => _party = party);
     }
 
     static const List<({String? section, String label, IconData icon})> _items = [
@@ -87,11 +100,13 @@ class _MainShellState extends State<MainShell> {
                                 onOpenParty: () => _go(2),
                                 onExploreMusic: () => _go(1),
                             ),
-                            MusicScreen(inParty: _partyCode != null),
+                            MusicScreen(inParty: _party != null),
                             PartyScreen(
                                 partyCode: _partyCode,
+                                party: _party,
                                 onCreate: _crearParty,
-                                onLeave: () => setState(() => _partyCode = null),
+                                onJoin: _unirseParty,
+                                onLeave: () => setState(() => _party = null),
                             ),
                             const ProfileScreen(),
                         ],
