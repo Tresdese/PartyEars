@@ -5,7 +5,8 @@ from rest_framework.views import APIView
 from .errores import ErrorApi, datos_invalidos
 from .servicios import (cambiar_permisos, consultar_party, crear_party, expulsar_miembro,
                         finalizar_party, leer_clave_idempotencia, party_actual,
-                        rehabilitar_miembro, salir_party, unirse_party)
+                        rehabilitar_miembro, salir_party, transferir_anfitrion,
+                        unirse_party)
 
 FORMATO_CODIGO = re.compile(r'^[A-Z0-9]{6}$')
 
@@ -143,3 +144,18 @@ class ExpulsarView(APIView):
 class RehabilitarView(ExpulsarView):
     """POST /api/v1/party/parties/{party_id}/miembros/{usuario_id}/rehabilitar (RF-30)."""
     servicio = staticmethod(rehabilitar_miembro)
+
+
+class AnfitrionView(APIView):
+    """POST /api/v1/party/parties/{party_id}/anfitrion (RF-31)."""
+
+    def post(self, request, party_id):
+        clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
+        version = validar_version(request.data)
+        try:
+            destinatario = uuid.UUID(str(request.data.get('usuario_id')))
+        except ValueError:
+            raise datos_invalidos('Elige a quién pasarle el cargo.', 'usuario_id',
+                                  ['Debe ser un UUID.'])
+        _, codigo_http = transferir_anfitrion(request.user, party_id, destinatario, version, clave)
+        return Response(status=codigo_http)
