@@ -20,6 +20,9 @@ OPERACION_UNIRSE = 'party.unirse'
 OPERACION_PERMISOS = 'party.permisos'
 OPERACION_SALIR = 'party.salir'
 OPERACION_FINALIZAR = 'party.finalizar'
+OPERACION_EXPULSAR = 'party.expulsar'
+OPERACION_REHABILITAR = 'party.rehabilitar'
+OPERACION_TRANSFERIR = 'party.transferir'
 INTENTOS_CODIGO = 10
 RECONEXION_CONSERVA_PERMISOS = timedelta(seconds=60)
 CIERRE_NO_ES_MIEMBRO = 4003
@@ -402,18 +405,24 @@ def aplicar_sucesion(party, anfitrion, ahora, pendientes):
     candidato. T-39 reutiliza esta función desde la detección de desconexión.
     """
     candidato = conectados_habilitados(party).order_by('orden_ingreso').first()
-    AnfitrionParty.objects.filter(party=party).update(usuario_id=candidato.usuario_id, asignado_en=ahora)
+    miembro = party.miembros.get(usuario_id=candidato.usuario_id)
+    _asignar_anfitrion(party, anfitrion.usuario_id, miembro, 'sucesion', ahora, pendientes)
+
+
+def _asignar_anfitrion(party, anterior_id, miembro, motivo, ahora, pendientes):
+    """Cambio de cargo común a la sucesión (RF-22) y a la transferencia manual (RF-31)."""
+    AnfitrionParty.objects.filter(party=party).update(usuario_id=miembro.usuario_id,
+                                                      asignado_en=ahora)
     _registrar_evento(party, 'anfitrion.cambio',
-                      {'anterior_id': str(anfitrion.usuario_id),
-                       'nuevo_id': str(candidato.usuario_id), 'motivo': 'sucesion'},
+                      {'anterior_id': str(anterior_id),
+                       'nuevo_id': str(miembro.usuario_id), 'motivo': motivo},
                       ahora, pendientes)
 
     # El anfitrión siempre tiene todos los permisos (4.4); el oyente que hereda el cargo no.
-    miembro = party.miembros.get(usuario_id=candidato.usuario_id)
     if not (miembro.puede_aportar and miembro.puede_modificar_cola):
         MiembroParty.objects.filter(id=miembro.id).update(puede_aportar=True, puede_modificar_cola=True)
         _registrar_evento(party, 'miembro.permisos',
-                          {'usuario_id': str(candidato.usuario_id), 'puede_aportar': True,
+                          {'usuario_id': str(miembro.usuario_id), 'puede_aportar': True,
                            'puede_modificar_cola': True}, ahora, pendientes)
 
 
@@ -544,6 +553,106 @@ def finalizar_party(usuario, party_id, clave):
     )
     _guardar_version_y_avisar(party, pendientes)
     return None, 204
+
+
+@transaction.atomic
+def _administrar_miembro(usuario, party_id, miembro_id, version_esperada, clave, operacion,
+                         aplicar):
+    """Validación común de las operaciones del anfitrión sobre otro miembro (contrato 4.5).
+
+    Devuelve (None, 204). La party queda bloqueada, así que dos operaciones simultáneas del
+    mismo anfitrión se aplican una tras otra y la segunda ve la versión ya cambiada.
+    """
+    _bloquear_clave(usuario.id, clave)
+    solicitud = huella({'operacion': operacion, 'party_id': str(party_id),
+                        'usuario_id': str(miembro_id), 'version_esperada': version_esperada})
+    party = _party_bloqueada(party_id)
+
+    previa = _buscar_operacion_previa(usuario, clave, solicitud)
+    if previa is not None:
+        return None, previa.codigo_respuesta
+
+    if party.finalizada_en is not None:
+        raise ErrorApi(410, 'PARTY_FINALIZADA', 'La party ya terminó.')
+    if AnfitrionParty.objects.get(party=party).usuario_id != usuario.id:
+        raise ErrorApi(403, 'NO_ES_ANFITRION', 'Solo el anfitrión puede hacer esto.')
+    if party.version != version_esperada:
+        raise ErrorApi(409, 'VERSION_OBSOLETA', 'La party cambió. Recarga para ver la actual.',
+                       {'version_actual': party.version})
+    # CU-23 FA-01: the host leaves through salir or finalizar, never by expelling themselves.
+    if miembro_id == usuario.id:
+        raise ErrorApi(400, 'DATOS_INVALIDOS', 'Esa acción no se puede aplicar a ti mismo.')
+    miembro = party.miembros.filter(usuario_id=miembro_id).first()
+    if miembro is None:
+        raise ErrorApi(404, 'NO_ENCONTRADO', 'Esa persona no está en la party.')
+
+    ahora = timezone.now()
+    pendientes = []
+    aplicar(party, miembro, ahora, pendientes)
+    OperacionConfirmada.objects.create(
+        actor_id=usuario.id, clave=clave, operacion=operacion, solicitud_sha256=solicitud,
+        codigo_respuesta=204, resultado={'party_id': str(party.id), 'version': party.version},
+        confirmada_en=ahora,
+    )
+    _guardar_version_y_avisar(party, pendientes)
+    return None, 204
+
+
+def _expulsar(party, miembro, ahora, pendientes):
+    # Already expelled instead of an error: the result the host wants is already in place.
+    if miembro.estado == 'expulsado':
+        return
+    # Permissions dropped too: once rehabilitated, the member comes back as a listener (4.5).
+    MiembroParty.objects.filter(id=miembro.id).update(estado='expulsado', puede_aportar=False,
+                                                      puede_modificar_cola=False)
+    usuario_id = str(miembro.usuario_id)
+    # miembro.expulsado first: the server closes the expelled member's socket on it, so the
+    # member still learns why before the socket goes away.
+    _registrar_evento(party, 'miembro.expulsado', {'usuario_id': usuario_id}, ahora, pendientes)
+    abiertas = party.participaciones.filter(usuario_id=miembro.usuario_id, salida_en__isnull=True)
+    if abiertas.update(salida_en=ahora, motivo_salida='expulsion'):
+        _registrar_evento(party, 'miembro.salida', {'usuario_id': usuario_id,
+                                                    'motivo': 'expulsion'}, ahora, pendientes)
+    # TODO(T-41): streaming must end the member's voice when it consumes miembro.expulsado.
+    finalizar_sin_conectados(party, ahora, pendientes)
+
+
+def _rehabilitar(party, miembro, ahora, pendientes):
+    if miembro.estado == 'habilitado':
+        return
+    MiembroParty.objects.filter(id=miembro.id).update(estado='habilitado')
+    _registrar_evento(party, 'miembro.rehabilitado', {'usuario_id': str(miembro.usuario_id)},
+                      ahora, pendientes)
+
+
+def expulsar_miembro(usuario, party_id, miembro_id, version_esperada, clave):
+    """RF-30, CU-23."""
+    return _administrar_miembro(usuario, party_id, miembro_id, version_esperada, clave,
+                                OPERACION_EXPULSAR, _expulsar)
+
+
+def rehabilitar_miembro(usuario, party_id, miembro_id, version_esperada, clave):
+    """RF-30, CU-23: retira la prohibición sin conectarlo; debe volver a unirse."""
+    return _administrar_miembro(usuario, party_id, miembro_id, version_esperada, clave,
+                                OPERACION_REHABILITAR, _rehabilitar)
+
+
+def _transferir(party, miembro, ahora, pendientes):
+    # CU-24 FA-01: the recipient must still be inside; whoever dropped or was expelled cannot
+    # take a role they would not be there to exercise.
+    if not _esta_dentro(party, miembro.usuario_id):
+        raise ErrorApi(409, 'DESTINATARIO_NO_ELEGIBLE',
+                       'Esa persona ya no está conectada a la party.')
+    # The previous host keeps their contribution permissions: CU-24 only removes the host-only
+    # powers, and those follow AnfitrionParty, not these flags.
+    anterior_id = AnfitrionParty.objects.get(party=party).usuario_id
+    _asignar_anfitrion(party, anterior_id, miembro, 'manual', ahora, pendientes)
+
+
+def transferir_anfitrion(usuario, party_id, destinatario_id, version_esperada, clave):
+    """RF-31, CU-24."""
+    return _administrar_miembro(usuario, party_id, destinatario_id, version_esperada, clave,
+                                OPERACION_TRANSFERIR, _transferir)
 
 
 def leer_clave_idempotencia(valor):

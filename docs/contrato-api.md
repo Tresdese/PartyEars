@@ -270,7 +270,7 @@ Estado completo de una party, usado en varias respuestas:
 - `orden_ingreso` define la sucesión (RF-22).
 - `codigo` solo se incluye si quien consulta es el anfitrión; los demás reciben `null`.
 
-### 4.1 Crear, salir y finalizar (Mariana)
+### 4.1 Crear, salir y finalizar
 
 #### 4.1.1 `POST /api/v1/party/parties` (RF-06, RF-07)
 
@@ -292,13 +292,15 @@ La party activa del usuario autenticado, o `204` si no está en ninguna. Lo usa 
 
 #### 4.1.3 `POST /api/v1/party/parties/{party_id}/salir` (RF-19, RF-22)
 
-Requiere `Idempotency-Key`. `204`. Si sale el anfitrión y hay candidatos, el servidor aplica la sucesión; si no queda nadie conectado, finaliza la party (RF-20).
+Requiere `Idempotency-Key`. `204`. Cierra la participación del usuario (`motivo_salida` `voluntaria`) y lo avisa como `miembro.salida`. Si sale el anfitrión y hay candidatos, el servidor aplica la sucesión (RF-22): el cargo pasa al primero por `orden_ingreso` entre conectados y habilitados, que recibe ambos permisos, y se publican `anfitrion.cambio` (`sucesion`) y, si sus permisos cambiaron, `miembro.permisos`. Si no queda nadie conectado y habilitado, finaliza la party (RF-20) con `party.finalizada` (`sin_conectados`). Quien vuelve a unirse entra como oyente con un `orden_ingreso` nuevo; el anfitrión anterior no recupera el cargo.
+
+El servidor cierra los WebSocket del usuario que salió con `4003` justo después de enviarle su `miembro.salida`.
 
 #### 4.1.4 `POST /api/v1/party/parties/{party_id}/finalizar` (RF-20)
 
-Requiere `Idempotency-Key`. Solo el anfitrión. `204`. Todos reciben `party.finalizada`.
+Requiere `Idempotency-Key`. Solo el anfitrión. `204`. Todos reciben `party.finalizada` (`anfitrion`) y el servidor cierra sus WebSocket con `4010` justo después de enviarlo. Las participaciones abiertas se cierran con `motivo_salida` `fin_party`. A partir de ahí, ingresar, consultar y cambiar la party responden `410 PARTY_FINALIZADA`; el código de invitación no se revoca, `unirse` responde `410` al comprobar la finalización.
 
-Errores comunes de 4.1.3 y 4.1.4: `403 NO_ES_MIEMBRO`, `403 NO_ES_ANFITRION`, `410 PARTY_FINALIZADA`.
+Errores comunes de 4.1.3 y 4.1.4: `403 NO_ES_MIEMBRO`, `403 NO_ES_ANFITRION` (solo en finalizar), `404 NO_ENCONTRADO`, `410 PARTY_FINALIZADA`.
 
 ### 4.2 `POST /api/v1/party/parties/unirse` (RF-08, RF-36)
 
@@ -342,8 +344,11 @@ Todas requieren `Idempotency-Key`, solo las ejecuta el anfitrión y devuelven `2
 | Expulsar | `POST .../parties/{party_id}/miembros/{usuario_id}/expulsar` | `{"version_esperada": 12}` |
 | Rehabilitar | `POST .../parties/{party_id}/miembros/{usuario_id}/rehabilitar` | `{"version_esperada": 12}` |
 
-- Transferir: el destinatario debe estar conectado y habilitado; si no, `409 DESTINATARIO_NO_ELEGIBLE`.
+- Transferir: el destinatario debe estar conectado y habilitado; si no, `409 DESTINATARIO_NO_ELEGIBLE`. Publica `anfitrion.cambio` (`manual`) y, si el nuevo anfitrión no tenía ambos permisos, `miembro.permisos` con los dos en `true`. El anterior conserva sus permisos de aportar y modificar la cola, pero pierde lo exclusivo del cargo: controlar la reproducción, cambiar permisos, expulsar, transferir y finalizar. Errores: `400 DATOS_INVALIDOS` (falta `usuario_id` o `version_esperada`, o se elige a sí mismo), `403 NO_ES_ANFITRION`, `404 NO_ENCONTRADO`, `409 VERSION_OBSOLETA`, `410 PARTY_FINALIZADA`.
 - Expulsar cierra su participación y su voz e impide que vuelva a entrar. Rehabilitar le permite entrar otra vez como oyente, sin conectarlo.
+- Expulsar publica `miembro.expulsado` y, si estaba conectado, `miembro.salida` (`expulsion`), en ese orden. El servidor cierra el WebSocket del expulsado con `4003` justo después de enviarle su `miembro.expulsado`. Sus permisos quedan en `false`. Si era el último conectado, la party finaliza (`sin_conectados`).
+- Rehabilitar publica `miembro.rehabilitado`. Expulsar a quien ya está expulsado, o rehabilitar a quien ya está habilitado, responde `204` sin cambiar la versión.
+- Errores de expulsar y rehabilitar: `400 DATOS_INVALIDOS` (falta `version_esperada` o el anfitrión se elige a sí mismo), `403 NO_ES_ANFITRION`, `404 NO_ENCONTRADO`, `409 VERSION_OBSOLETA`, `410 PARTY_FINALIZADA`.
 
 ### 4.6 Chat (Mariana, RF-26)
 
@@ -641,7 +646,7 @@ Servidor → cliente, salvo que se indique otra dirección.
 | `chat.mensaje` | Mensaje (formato de 4.6) | RF-26 |
 | `reloj.pong` | Ver 7.4 | RNF-03 |
 
-Al recibir `miembro.expulsado` sobre sí mismo o `party.finalizada`, el cliente detiene el audio, sale de la voz y cierra los tres WebSocket.
+Al recibir `miembro.expulsado` sobre sí mismo o `party.finalizada`, el cliente detiene el audio, sale de la voz y cierra los tres WebSocket. El WebSocket de `party` también lo cierra el servidor tras enviar `party.finalizada` (`4010`) o el `miembro.salida` del propio usuario (`4003`).
 
 **queue**
 

@@ -3,8 +3,10 @@ import uuid
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from .errores import ErrorApi, datos_invalidos
-from .servicios import (cambiar_permisos, consultar_party, crear_party, finalizar_party,
-                        leer_clave_idempotencia, party_actual, salir_party, unirse_party)
+from .servicios import (cambiar_permisos, consultar_party, crear_party, expulsar_miembro,
+                        finalizar_party, leer_clave_idempotencia, party_actual,
+                        rehabilitar_miembro, salir_party, transferir_anfitrion,
+                        unirse_party)
 
 FORMATO_CODIGO = re.compile(r'^[A-Z0-9]{6}$')
 
@@ -86,12 +88,16 @@ def validar_permisos(cuerpo):
         if not isinstance(cuerpo.get(campo), bool):
             raise datos_invalidos('Indica cada permiso como true o false.', campo,
                                   ['Debe ser true o false.'])
-    version = cuerpo.get('version_esperada')
+    return cuerpo['puede_aportar'], cuerpo['puede_modificar_cola'], validar_version(cuerpo)
+
+
+def validar_version(cuerpo):
+    version = cuerpo.get('version_esperada') if isinstance(cuerpo, dict) else None
     # bool excluded on purpose: in Python True is an int, and JSON true is not a version.
     if not isinstance(version, int) or isinstance(version, bool) or version < 0:
         raise datos_invalidos('Falta la versión de la party que estás viendo.',
                               'version_esperada', ['Debe ser un entero.'])
-    return cuerpo['puede_aportar'], cuerpo['puede_modificar_cola'], version
+    return version
 
 
 class PermisosView(APIView):
@@ -121,4 +127,35 @@ class FinalizarView(APIView):
     def post(self, request, party_id):
         clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
         _, codigo_http = finalizar_party(request.user, party_id, clave)
+        return Response(status=codigo_http)
+
+
+class ExpulsarView(APIView):
+    """POST /api/v1/party/parties/{party_id}/miembros/{usuario_id}/expulsar (RF-30)."""
+    servicio = staticmethod(expulsar_miembro)
+
+    def post(self, request, party_id, usuario_id):
+        clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
+        version = validar_version(request.data)
+        _, codigo_http = self.servicio(request.user, party_id, usuario_id, version, clave)
+        return Response(status=codigo_http)
+
+
+class RehabilitarView(ExpulsarView):
+    """POST /api/v1/party/parties/{party_id}/miembros/{usuario_id}/rehabilitar (RF-30)."""
+    servicio = staticmethod(rehabilitar_miembro)
+
+
+class AnfitrionView(APIView):
+    """POST /api/v1/party/parties/{party_id}/anfitrion (RF-31)."""
+
+    def post(self, request, party_id):
+        clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
+        version = validar_version(request.data)
+        try:
+            destinatario = uuid.UUID(str(request.data.get('usuario_id')))
+        except ValueError:
+            raise datos_invalidos('Elige a quién pasarle el cargo.', 'usuario_id',
+                                  ['Debe ser un UUID.'])
+        _, codigo_http = transferir_anfitrion(request.user, party_id, destinatario, version, clave)
         return Response(status=codigo_http)

@@ -107,7 +107,7 @@ void main() {
             tester.view.physicalSize = const Size(1440, 900);
             tester.view.devicePixelRatio = 1.0;
             addTearDown(tester.view.reset);
-            await tester.pumpWidget(MaterialApp(home: Scaffold(body: PartyEnCurso(party: s.party, onLeave: () {}))));
+            await tester.pumpWidget(MaterialApp(home: Scaffold(body: PartyEnCurso(party: s.party, onLeave: (_) {}))));
             await tester.pump();
         }
 

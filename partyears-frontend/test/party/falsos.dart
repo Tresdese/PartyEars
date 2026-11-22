@@ -60,6 +60,22 @@ class PartyServiceFalso implements PartyService {
     Future<PartyActual> crear(String nombre, {String? clave}) async => party;
     @override
     Future<PartyActual> unirse(String codigo, {String? clave}) async => party;
+    final salidas = <String>[];
+    Object? errorSalir;
+    Object? errorFinalizar;
+
+    @override
+    Future<void> salir(String partyId) async {
+        if (errorSalir != null) throw errorSalir!;
+        salidas.add('salir');
+    }
+
+    @override
+    Future<void> finalizar(String partyId) async {
+        if (errorFinalizar != null) throw errorFinalizar!;
+        salidas.add('finalizar');
+    }
+
     @override
     Future<int> cambiarPermisos(String partyId, String usuarioId, {required bool puedeAportar, required bool puedeModificarCola,
                                 required int versionEsperada}) async {
@@ -111,13 +127,16 @@ class WsQuieto extends WsSimulado {
 /// WebSocket que queda conectado al instante, sin eventos ni temporizadores.
 class WsConectado implements WsClient {
     final _estado = StreamController<WsEstado>.broadcast();
+    final _eventos = StreamController<WsEvento>.broadcast();
+
+    void emitir(String tipo, [Map<String, dynamic> datos = const {}]) => _eventos.add(WsEvento(tipo: tipo, datos: datos));
 
     @override
     Stream<WsEstado> get estado => _estado.stream;
     @override
     WsEstado estadoActual = WsEstado.desconectado;
     @override
-    Stream<WsEvento> get eventos => const Stream.empty();
+    Stream<WsEvento> get eventos => _eventos.stream;
     @override
     Stream<WsMotivoCierre> get cierres => const Stream.empty();
     @override

@@ -13,7 +13,9 @@ class PartyEnCurso extends StatefulWidget {
     const PartyEnCurso({super.key, required this.party, required this.onLeave});
 
     final PartyActual party;
-    final VoidCallback onLeave;
+
+    /// Se llama al terminar la party para este usuario, con el mensaje que hay que mostrar.
+    final void Function(String? mensaje) onLeave;
 
     @override
     State<PartyEnCurso> createState() => _PartyEnCursoState();
@@ -22,14 +24,67 @@ class PartyEnCurso extends StatefulWidget {
 class _PartyEnCursoState extends State<PartyEnCurso> {
     late final SesionParty _sesion = SesionParty.fabrica(widget.party);
 
+    bool _saliendo = false;
+
     @override
     void initState() {
         super.initState();
+        _sesion.addListener(_alCambiar);
         _sesion.iniciar();
+    }
+
+    // CU-16 step 7-8 and the WebSocket close codes: whoever the party ended for goes back to
+    // the main screen with a message instead of staying on a dead screen.
+    void _alCambiar() {
+        final mensaje = switch (_sesion.cierre) {
+            WsMotivoCierre.partyFinalizada => 'La party ha finalizado',
+            WsMotivoCierre.sinAcceso => 'Ya no estás en esta party',
+            WsMotivoCierre.partyNoExiste => 'Esta party no existe',
+            _ => null,
+        };
+        if (mensaje != null && !_saliendo) {
+            _saliendo = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) => widget.onLeave(mensaje));
+        }
+    }
+
+    Future<bool> _confirmar(String texto, String accion) async {
+        final si = await showDialog<bool>(
+            context: context,
+            builder: (contexto) => AlertDialog(
+                content: Text(texto),
+                actions: [
+                    TextButton(onPressed: () => Navigator.of(contexto).pop(false), child: const Text('Cancelar')),
+                    FilledButton(onPressed: () => Navigator.of(contexto).pop(true), child: Text(accion)),
+                ],
+            ),
+        );
+        return si ?? false;
+    }
+
+    Future<void> _salir() async {
+        if (!await _confirmar('¿Deseas salir de la party?', 'Salir')) return;
+        _saliendo = true;
+        final mensaje = await _sesion.salir();
+        widget.onLeave(mensaje);
+    }
+
+    Future<void> _finalizar() async {
+        const texto = '¿Deseas finalizar la party? La reproducción compartida terminará para todos los participantes';
+        if (!await _confirmar(texto, 'Finalizar')) return;
+        _saliendo = true;
+        final mensaje = await _sesion.finalizar();
+        if (_sesion.cierre == WsMotivoCierre.partyFinalizada) {
+            widget.onLeave(mensaje);
+        } else {
+            _saliendo = false;
+            _mostrar(mensaje);
+        }
     }
 
     @override
     void dispose() {
+        _sesion.removeListener(_alCambiar);
         _sesion.dispose();
         super.dispose();
     }
@@ -110,10 +165,22 @@ class _PartyEnCursoState extends State<PartyEnCurso> {
                         onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const VoiceScreen())),
                     ),
                     const SizedBox(height: 16),
-                    OutlinedButton.icon(
-                        onPressed: widget.onLeave,
-                        icon: const Icon(Icons.exit_to_app),
-                        label: const Text('Salir de la party (demo)'),
+                    Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: [
+                            OutlinedButton.icon(
+                                onPressed: _salir,
+                                icon: const Icon(Icons.exit_to_app),
+                                label: const Text('Salir de la party'),
+                            ),
+                            if (_sesion.esAnfitrion)
+                                OutlinedButton.icon(
+                                    onPressed: _finalizar,
+                                    icon: const Icon(Icons.stop_circle_outlined),
+                                    label: const Text('Finalizar party'),
+                                ),
+                        ],
                     ),
                 ],
             ),
