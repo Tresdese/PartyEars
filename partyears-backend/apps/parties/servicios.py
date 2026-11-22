@@ -207,6 +207,15 @@ def _puede_conservar_permisos(party, usuario_id, ahora):
             and ahora - ultima.salida_en <= RECONEXION_CONSERVA_PERMISOS)
 
 
+def _esta_dentro(party, usuario_id):
+    # Open participation instead of membership alone: whoever left or was expelled keeps
+    # their member row, but must not keep reading or changing the party.
+    esta_conectado = party.participaciones.filter(usuario_id=usuario_id,
+                                                  salida_en__isnull=True).exists()
+    esta_habilitado = party.miembros.filter(usuario_id=usuario_id, estado='habilitado').exists()
+    return esta_conectado and esta_habilitado
+
+
 def verificar_acceso_websocket(party_id, usuario_id):
     """Contrato 7.2. Devuelve (código de cierre o None, versión de la party)."""
     party = Party.objects.filter(id=party_id).first()
@@ -214,15 +223,21 @@ def verificar_acceso_websocket(party_id, usuario_id):
         return CIERRE_PARTY_NO_EXISTE, None
     if party.finalizada_en is not None:
         return CIERRE_PARTY_FINALIZADA, None
-
-    # Open participation instead of membership alone: whoever left or was expelled keeps
-    # their member row, but must not keep receiving the party's events.
-    esta_conectado = party.participaciones.filter(usuario_id=usuario_id,
-                                                  salida_en__isnull=True).exists()
-    esta_habilitado = party.miembros.filter(usuario_id=usuario_id, estado='habilitado').exists()
-    if not (esta_conectado and esta_habilitado):
+    if not _esta_dentro(party, usuario_id):
         return CIERRE_NO_ES_MIEMBRO, None
     return None, party.version
+
+
+def consultar_party(usuario, party_id):
+    """Contrato 4.3: instantánea para el cliente y para validar permisos desde queue."""
+    party = Party.objects.filter(id=party_id).first()
+    if party is None:
+        raise ErrorApi(404, 'NO_ENCONTRADO', 'Esa party no existe.')
+    if party.finalizada_en is not None:
+        raise ErrorApi(410, 'PARTY_FINALIZADA', 'La party ya terminó.')
+    if not _esta_dentro(party, usuario.id):
+        raise ErrorApi(403, 'NO_ES_MIEMBRO', 'No estás dentro de esta party.')
+    return estado_completo(party, usuario)
 
 
 def _avisar_conectados(party_id, tipo, datos, version):
