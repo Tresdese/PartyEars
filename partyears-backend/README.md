@@ -55,7 +55,7 @@ En la prueba, el profesor elige la PC de uno del equipo para correr el backend y
    - `ALLOWED_HOSTS=<tu IP 10.9.0.x>`;
    - `REDIS_URL` (sin Redis, los cambios de la cola no llegan a los teléfonos);
    - las `*_RABBITMQ_URL`, que son opcionales: sin ellas no se guarda el registro técnico, pero la party funciona;
-   - `MUSIC_MEDIA_ROOT` apuntando a tu copia del catálogo.
+   - `MUSIC_MEDIA_ROOT` apuntando a tu copia del catálogo de demo. Descomprime `PartyEars-demo.tar` (pídeselo a Darlington) y usa la ruta de la carpeta `PartyEars-demo`, la que contiene `Telegram/`. Ya está cargado en la base, así que no hace falta correr `cargar_catalogo`. Solo suenan las 25 canciones de `PartyEars-demo/canciones.txt`: las demás aparecen en la búsqueda, pero no tienen archivo en tu máquina.
 3. **Genera tus claves JWT** si no tienes `claves-dev/`. Usa los dos comandos `openssl` de `.env.example`; en Windows, desde Git Bash. Cada máquina puede tener las suyas: los tokens solo valen en el backend que los emitió.
 4. **Abre los puertos 8001 a 8004** en el firewall:
    - en Linux, `sudo ufw allow 8001:8004/tcp`;
