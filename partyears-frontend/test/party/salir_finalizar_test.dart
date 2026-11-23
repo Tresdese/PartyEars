@@ -108,5 +108,34 @@ void main() {
             await tester.pump();
             expect(salidas, ['La party ha finalizado']);
         });
+
+        testWidgets('en escritorio la confirmación de salida dice "Confirmar salida" (P-08)', (tester) async {
+            await mostrar(tester, _oyente);
+            await tester.tap(find.text('Salir de la party'));
+            await tester.pumpAndSettle();
+            expect(find.text('¿Deseas salir de la party?'), findsOneWidget);
+            expect(find.text('Confirmar salida'), findsOneWidget);
+            expect(find.text('Cancelar'), findsOneWidget);
+        }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+        testWidgets('en escritorio la confirmación de finalizar dice "Finalizar para todos" (P-08)', (tester) async {
+            await mostrar(tester, partyDePrueba);
+            await tester.tap(find.text('Finalizar party'));
+            await tester.pumpAndSettle();
+            expect(find.text('Finalizar para todos'), findsOneWidget);
+            expect(find.text('Cancelar'), findsOneWidget);
+        }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+        testWidgets('en Android las confirmaciones dicen "Salir" y "Finalizar" (P-08)', (tester) async {
+            await mostrar(tester, partyDePrueba);
+            await tester.tap(find.text('Salir de la party'));
+            await tester.pumpAndSettle();
+            expect(find.text('Salir'), findsOneWidget);
+            await tester.tap(find.text('Cancelar'));
+            await tester.pumpAndSettle();
+            await tester.tap(find.text('Finalizar party'));
+            await tester.pumpAndSettle();
+            expect(find.text('Finalizar'), findsOneWidget);
+        }, variant: TargetPlatformVariant.only(TargetPlatform.android));
     });
 }
