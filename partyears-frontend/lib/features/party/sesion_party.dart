@@ -76,6 +76,7 @@ class SesionParty extends ChangeNotifier {
     String? aviso;
     String? errorAudio;
     WsMotivoCierre? cierre;
+    String? motivoFinalizacion;
     bool _cerrada = false;
     // The server told this socket that the person left or was expelled (contract 7.4).
     bool _meSacaron = false;
@@ -216,7 +217,10 @@ class SesionParty extends ChangeNotifier {
             case 'reproduccion.estado':
                 await _aplicarReproduccion(EstadoReproduccion.desdeJson(evento.datos));
             case 'party.finalizada':
-                _cambiar(() => cierre = WsMotivoCierre.partyFinalizada);
+                _cambiar(() {
+                    motivoFinalizacion = evento.datos['motivo'] as String?;
+                    cierre = WsMotivoCierre.partyFinalizada;
+                });
                 await cerrar();
             default:
                 // Members, permissions and host: a fresh snapshot instead of patching each event.
