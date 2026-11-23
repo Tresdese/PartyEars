@@ -48,6 +48,8 @@ class _PartyEnCursoState extends State<PartyEnCurso> {
         }
     }
 
+    bool get _esMovil => Theme.of(context).platform == TargetPlatform.android;
+
     Future<bool> _confirmar(String texto, String accion) async {
         final si = await showDialog<bool>(
             context: context,
@@ -63,7 +65,7 @@ class _PartyEnCursoState extends State<PartyEnCurso> {
     }
 
     Future<void> _salir() async {
-        if (!await _confirmar('¿Deseas salir de la party?', 'Salir')) return;
+        if (!await _confirmar('¿Deseas salir de la party?', _esMovil ? 'Salir' : 'Confirmar salida')) return;
         _saliendo = true;
         final mensaje = await _sesion.salir();
         widget.onLeave(mensaje);
@@ -71,7 +73,7 @@ class _PartyEnCursoState extends State<PartyEnCurso> {
 
     Future<void> _finalizar() async {
         const texto = '¿Deseas finalizar la party? La reproducción compartida terminará para todos los participantes';
-        if (!await _confirmar(texto, 'Finalizar')) return;
+        if (!await _confirmar(texto, _esMovil ? 'Finalizar' : 'Finalizar para todos')) return;
         _saliendo = true;
         final mensaje = await _sesion.finalizar();
         if (_sesion.cierre == WsMotivoCierre.partyFinalizada) {
