@@ -270,7 +270,7 @@ class _Conexion extends StatelessWidget {
             null => switch (estado) {
                 WsEstado.conectado => ('Conectado', AppColors.success),
                 WsEstado.conectando => ('Conectando…', Colors.orangeAccent),
-                _ => ('Sin conexión, reintentando…', Colors.orangeAccent),
+                _ => ('Sin conexión, modificaciones deshabilitadas', Colors.orangeAccent),
             },
         };
         return Row(children: [StatusDot(color: color), const SizedBox(width: 8), Text(texto, style: TextStyle(color: color))]);
