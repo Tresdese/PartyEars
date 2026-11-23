@@ -33,11 +33,8 @@ class _PartyEnCursoState extends State<PartyEnCurso> {
         _sesion.iniciar();
     }
 
-    // CU-16 step 7-8 and the WebSocket close codes: whoever the party ended for goes back to
-    // the main screen with a message instead of staying on a dead screen.
     void _alCambiar() {
         final mensaje = switch (_sesion.cierre) {
-            WsMotivoCierre.partyFinalizada => 'La party ha finalizado',
             WsMotivoCierre.sinAcceso => 'Ya no estás en esta party',
             WsMotivoCierre.partyNoExiste => 'Esta party no existe',
             _ => null,
@@ -49,6 +46,7 @@ class _PartyEnCursoState extends State<PartyEnCurso> {
     }
 
     bool get _esMovil => Theme.of(context).platform == TargetPlatform.android;
+    bool get _terminada => _sesion.cierre == WsMotivoCierre.partyFinalizada && !_saliendo;
 
     Future<bool> _confirmar(String texto, String accion) async {
         final si = await showDialog<bool>(
@@ -109,7 +107,9 @@ class _PartyEnCursoState extends State<PartyEnCurso> {
     Widget build(BuildContext context) {
         return ListenableBuilder(
             listenable: _sesion,
-            builder: (context, _) => ListView(
+            builder: (context, _) => _terminada 
+                   ? _PartyCerrada(motivo: _sesion.motivoFinalizacion, movil: _esMovil, alVolver: () => widget.onLeave(null)) 
+                   : ListView(
                 padding: const EdgeInsets.all(24),
                 children: [
                     Text(_sesion.party.nombre, style: Theme.of(context).textTheme.headlineMedium),
@@ -366,5 +366,33 @@ class _AvisoAnfitrion extends StatelessWidget {
             const SizedBox(width: 8),
             Expanded(child: Text(texto)),
         ]);
+    }
+}
+
+
+class _PartyCerrada extends StatelessWidget {
+    const _PartyCerrada({required this.motivo, required this.movil, required this.alVolver});
+
+    final String? motivo;
+    final bool movil;
+    final VoidCallback alVolver;
+
+    @override
+    Widget build(BuildContext context) {
+        final texto = motivo == 'sin_conectados' 
+                             ? (movil ? 'Sin conectados: party cerrada' : 'Sin miembros conectados: cierre automático')
+                             : 'La party ha finalizado';
+        return Center(
+            child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                    const Icon(Icons.stop_circle_outlined, size: 48, color: AppColors.muted),
+                    const SizedBox(height: 16),
+                    Text(texto, style: Theme.of(context).textTheme.titleLarge, textAlign: TextAlign.center),
+                    const SizedBox(height: 24),
+                    FilledButton(onPressed: alVolver, child: const Text('Volver al catálogo')),
+                ],
+            ),
+        );
     }
 }
