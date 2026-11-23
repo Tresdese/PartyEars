@@ -33,11 +33,8 @@ class _PartyEnCursoState extends State<PartyEnCurso> {
         _sesion.iniciar();
     }
 
-    // CU-16 step 7-8 and the WebSocket close codes: whoever the party ended for goes back to
-    // the main screen with a message instead of staying on a dead screen.
     void _alCambiar() {
         final mensaje = switch (_sesion.cierre) {
-            WsMotivoCierre.partyFinalizada => 'La party ha finalizado',
             WsMotivoCierre.sinAcceso => 'Ya no estás en esta party',
             WsMotivoCierre.partyNoExiste => 'Esta party no existe',
             _ => null,
@@ -47,6 +44,9 @@ class _PartyEnCursoState extends State<PartyEnCurso> {
             WidgetsBinding.instance.addPostFrameCallback((_) => widget.onLeave(mensaje));
         }
     }
+
+    bool get _esMovil => Theme.of(context).platform == TargetPlatform.android;
+    bool get _terminada => _sesion.cierre == WsMotivoCierre.partyFinalizada && !_saliendo;
 
     Future<bool> _confirmar(String texto, String accion) async {
         final si = await showDialog<bool>(
@@ -63,7 +63,7 @@ class _PartyEnCursoState extends State<PartyEnCurso> {
     }
 
     Future<void> _salir() async {
-        if (!await _confirmar('¿Deseas salir de la party?', 'Salir')) return;
+        if (!await _confirmar('¿Deseas salir de la party?', _esMovil ? 'Salir' : 'Confirmar salida')) return;
         _saliendo = true;
         final mensaje = await _sesion.salir();
         widget.onLeave(mensaje);
@@ -71,7 +71,7 @@ class _PartyEnCursoState extends State<PartyEnCurso> {
 
     Future<void> _finalizar() async {
         const texto = '¿Deseas finalizar la party? La reproducción compartida terminará para todos los participantes';
-        if (!await _confirmar(texto, 'Finalizar')) return;
+        if (!await _confirmar(texto, _esMovil ? 'Finalizar' : 'Finalizar para todos')) return;
         _saliendo = true;
         final mensaje = await _sesion.finalizar();
         if (_sesion.cierre == WsMotivoCierre.partyFinalizada) {
@@ -107,12 +107,18 @@ class _PartyEnCursoState extends State<PartyEnCurso> {
     Widget build(BuildContext context) {
         return ListenableBuilder(
             listenable: _sesion,
-            builder: (context, _) => ListView(
+            builder: (context, _) => _terminada 
+                   ? _PartyCerrada(motivo: _sesion.motivoFinalizacion, movil: _esMovil, alVolver: () => widget.onLeave(null)) 
+                   : ListView(
                 padding: const EdgeInsets.all(24),
                 children: [
                     Text(_sesion.party.nombre, style: Theme.of(context).textTheme.headlineMedium),
                     const SizedBox(height: 8),
                     _Conexion(estado: _sesion.conexion, cierre: _sesion.cierre),
+                    if (_sesion.cambioAnfitrion case final cambio?) ...[
+                        const SizedBox(height: 8),
+                        _AvisoAnfitrion(nuevo: cambio.nuevo, anteriorDesconectado: cambio.anteriorDesconectado, movil: _esMovil),
+                    ],
                     const SizedBox(height: 16),
                     if (_sesion.party.codigo != null)
                         ListTile(
@@ -270,7 +276,7 @@ class _Conexion extends StatelessWidget {
             null => switch (estado) {
                 WsEstado.conectado => ('Conectado', AppColors.success),
                 WsEstado.conectando => ('Conectando…', Colors.orangeAccent),
-                _ => ('Sin conexión, reintentando…', Colors.orangeAccent),
+                _ => ('Sin conexión, modificaciones deshabilitadas', Colors.orangeAccent),
             },
         };
         return Row(children: [StatusDot(color: color), const SizedBox(width: 8), Text(texto, style: TextStyle(color: color))]);
@@ -288,7 +294,7 @@ class _Participante extends StatelessWidget {
 
     @override
     Widget build(BuildContext context) {
-        final nombre = miembro.nombreUsuario ?? 'Usuario ${miembro.usuarioId.substring(0, miembro.usuarioId.length.clamp(0, 8))}';
+        final nombre = miembro.nombreVisible;
         return ListTile(
             leading: StatusDot(color: miembro.conectado ? AppColors.success : AppColors.muted),
             title: Text(esAnfitrion ? '$nombre (anfitrión)' : nombre),
@@ -343,3 +349,50 @@ class _Aviso extends StatelessWidget {
     }
 }
 
+class _AvisoAnfitrion extends StatelessWidget {
+    const _AvisoAnfitrion({required this.nuevo, required this.anteriorDesconectado, required this.movil});
+
+    final String nuevo;
+    final bool anteriorDesconectado;
+    final bool movil;
+
+    @override
+    Widget build(BuildContext context) {
+        final texto = anteriorDesconectado && !movil
+            ? 'Anfitrión desconectado: $nuevo es el sucesor por orden de ingreso'
+            : 'Nuevo anfitrión: $nuevo';
+        return Row(children: [
+            const Icon(Icons.info_outline, size: 18, color: AppColors.muted),
+            const SizedBox(width: 8),
+            Expanded(child: Text(texto)),
+        ]);
+    }
+}
+
+
+class _PartyCerrada extends StatelessWidget {
+    const _PartyCerrada({required this.motivo, required this.movil, required this.alVolver});
+
+    final String? motivo;
+    final bool movil;
+    final VoidCallback alVolver;
+
+    @override
+    Widget build(BuildContext context) {
+        final texto = motivo == 'sin_conectados' 
+                             ? (movil ? 'Sin conectados: party cerrada' : 'Sin miembros conectados: cierre automático')
+                             : 'La party ha finalizado';
+        return Center(
+            child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                    const Icon(Icons.stop_circle_outlined, size: 48, color: AppColors.muted),
+                    const SizedBox(height: 16),
+                    Text(texto, style: Theme.of(context).textTheme.titleLarge, textAlign: TextAlign.center),
+                    const SizedBox(height: 24),
+                    FilledButton(onPressed: alVolver, child: const Text('Volver al catálogo')),
+                ],
+            ),
+        );
+    }
+}

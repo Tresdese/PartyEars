@@ -20,6 +20,8 @@ class MiembroParty {
     final bool puedeAportar;
     final bool puedeModificarCola;
     final bool conectado;
+
+    String get nombreVisible => nombreUsuario ?? 'Usuario ${usuarioId.substring(0, usuarioId.length.clamp(0, 8))}';
 }
 
 class PartyActual {
