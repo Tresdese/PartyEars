@@ -33,6 +33,12 @@ function Abrir([string]$titulo, [string]$settings, [string]$comando) {
     Start-Process powershell -WorkingDirectory $PSScriptRoot -ArgumentList '-NoExit', '-Command', $orden
 }
 
+# Before party starts: whoever was inside when the previous backend stopped would stay
+# "connected" forever, because the 15 s silence timer died with that process.
+$env:DJANGO_SETTINGS_MODULE = 'config.settings.party'
+.\.venv\Scripts\python.exe manage.py cerrar_desconectados
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 foreach ($s in 'auth', 'music', 'party', 'queue') {
     Abrir $s $s "runserver --noreload 0.0.0.0:$($puertos[$s])"
 }

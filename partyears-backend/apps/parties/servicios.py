@@ -540,6 +540,22 @@ def desconectar_participante(party_id, usuario_id):
     return True
 
 
+def cerrar_participaciones_abiertas():
+    """Marca como desconectado a todo el que siga dentro de una party activa. Devuelve cuántos.
+
+    The 15 s silence timer lives in the party process: when it stops, whoever was inside stays
+    "connected" in the shared database with nobody left to notice, holding a place, the host
+    role and the party itself. Same path as a detected disconnection, so succession and the
+    automatic end apply; whoever is really there reconnects and keeps their permissions
+    within 60 s (RF-21). Only for when no other party process uses this database.
+    """
+    abiertas = list(ParticipacionParty.objects
+                    .filter(salida_en__isnull=True, party__finalizada_en__isnull=True)
+                    .values_list('party_id', 'usuario_id'))
+    return sum(desconectar_participante(party_id, usuario_id)
+               for party_id, usuario_id in abiertas)
+
+
 @transaction.atomic
 def finalizar_party(usuario, party_id, clave):
     """RF-18, RF-20. Devuelve (None, 204)."""
