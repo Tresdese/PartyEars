@@ -7,6 +7,7 @@ import '../../../core/network/api_exception.dart';
 import '../../../core/network/red.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/common.dart';
+import '../../party/data/party_service.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends StatelessWidget {
@@ -166,6 +167,43 @@ class _LoginFormState extends State<_LoginForm> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Future<void> _cambiarServidor() async {
+    final campo = TextEditingController(text: Red.instancia.host);
+    final host = await showDialog<String>(
+      context: context,
+      builder: (contexto) => AlertDialog(
+        title: const Text('Servidor de PartyEars'),
+        content: TextField(
+          controller: campo,
+          autofocus: true,
+          keyboardType: TextInputType.url,
+          decoration: const InputDecoration(
+            labelText: 'IP de la máquina con el backend',
+            hintText: '10.8.0.6',
+          ),
+          onSubmitted: (texto) => Navigator.of(contexto).pop(texto),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(contexto).pop(),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(contexto).pop(campo.text),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+    campo.dispose();
+    final limpio = host == null ? '' : hostDeTexto(host);
+    if (limpio.isEmpty) return;
+    // The saved party code belongs to the old backend's database session.
+    await PartyService.olvidar();
+    await Red.instancia.cambiarServidor(limpio);
+    if (mounted) setState(() {});
+  }
+
   // CU-02: api_client keeps the tokens of a successful /login, so here only navigate.
   Future<void> _entrar() async {
     setState(() => _enviando = true);
@@ -244,7 +282,22 @@ class _LoginFormState extends State<_LoginForm> {
               ],
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
+          Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(
+                'Servidor: ${Red.instancia.host}',
+                style: const TextStyle(color: AppColors.muted, fontSize: 12),
+              ),
+              TextButton(
+                onPressed: _enviando ? null : _cambiarServidor,
+                child: const Text('Cambiar', style: TextStyle(fontSize: 12)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
           const Divider(),
           const SizedBox(height: 16),
           Wrap(
@@ -267,6 +320,15 @@ class _LoginFormState extends State<_LoginForm> {
       ),
     );
   }
+}
+
+/// Lo que la persona escribe como servidor, reducido al host: acepta "http://10.8.0.6:8001/".
+String hostDeTexto(String texto) {
+  var host = texto.trim();
+  final esquema = host.indexOf('://');
+  if (esquema >= 0) host = host.substring(esquema + 3);
+  host = host.split('/').first.split(':').first;
+  return host.contains(' ') ? '' : host;
 }
 
 /// CU-02. Lanza ApiException con el mensaje del servidor si el correo o la contraseña fallan.
