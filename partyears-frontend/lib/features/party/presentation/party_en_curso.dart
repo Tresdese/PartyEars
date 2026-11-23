@@ -290,7 +290,7 @@ class _Participante extends StatelessWidget {
 
     @override
     Widget build(BuildContext context) {
-        final nombre = miembro.nombreUsuario ?? 'Usuario ${miembro.usuarioId.substring(0, miembro.usuarioId.length.clamp(0, 8))}';
+        final nombre = miembro.nombreVisible;
         return ListTile(
             leading: StatusDot(color: miembro.conectado ? AppColors.success : AppColors.muted),
             title: Text(esAnfitrion ? '$nombre (anfitrión)' : nombre),
