@@ -80,6 +80,19 @@ class CatalogoMusicaTests(TestCase):
             call_command('cargar_catalogo', str(self.origen_dir))
             self.assertEqual(RecursoAudio.objects.count(), total_inicial)
 
+    def test_la_busqueda_omite_canciones_sin_archivo_en_esta_maquina(self):
+        with override_settings(MEDIA_ROOT=self.media_dir):
+            generar_carpeta_muestra(self.origen_dir)
+            call_command('cargar_catalogo', str(self.origen_dir))
+            # Another machine's copy of the catalog lacks this file (demo package, T-14).
+            (self.media_dir / 'catalogo' / 'Queen - Bohemian Rhapsody.wav').unlink()
+
+            cuerpo = self.cliente.get('/api/v1/music/canciones?pagina=1').json()
+            self.assertEqual(cuerpo['total'], 19)
+            titulos = [c['titulo'] for c in
+                       self.cliente.get('/api/v1/music/canciones?q=queen').json()['resultados']]
+            self.assertEqual(titulos, ["Don't Stop Me Now"])
+
     def test_endpoints_busqueda_detalle_y_streaming_por_rangos(self):
         with override_settings(MEDIA_ROOT=self.media_dir):
             generar_carpeta_muestra(self.origen_dir)
