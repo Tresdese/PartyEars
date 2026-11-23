@@ -34,6 +34,10 @@ con_etiqueta() {
     "$@" 2>&1 | sed -u "s/^/[$etiqueta] /" &
 }
 
+# Before party starts: whoever was inside when the previous backend stopped would stay
+# "connected" forever, because the 15 s silence timer died with that process.
+DJANGO_SETTINGS_MODULE=config.settings.party venv/bin/python manage.py cerrar_desconectados
+
 for servicio in auth music party queue; do
     con_etiqueta "$servicio" env DJANGO_SETTINGS_MODULE="config.settings.$servicio" \
         venv/bin/python manage.py runserver --noreload "0.0.0.0:${PUERTOS[$servicio]}"

@@ -70,7 +70,7 @@ En la prueba, el profesor elige la PC de uno del equipo para correr el backend y
    ```powershell
    .\partyearsBackend.ps1 todos   # una ventana por servicio; ciérralas para detener
    ```
-   Arranca auth, music, party y queue, más los procesos de eventos cuyas URL estén en `.env`.
+   Arranca auth, music, party y queue, más los procesos de eventos cuyas URL estén en `.env`. Antes, corre `cerrar_desconectados`: quien seguía dentro de una party cuando se apagó el backend anterior se marca como desconectado, y si de verdad está ahí, la app lo vuelve a meter sola. **No uses `todos` si otro compañero tiene su propio `party` corriendo contra la misma base al mismo tiempo**, porque sacaría a su gente. Para eso levanta los servicios uno por uno (sección 2).
 6. **Comprueba desde otra PC de la VPN:** `curl http://<tu IP>:8002/api/v1/music/canciones` debe responder `401` (llega y pide sesión).
 7. **En la app,** cada persona toca **Servidor → Cambiar** en la pantalla de inicio de sesión y escribe tu IP. Las cuentas y las parties están en la base compartida, así que sirven las mismas en cualquier máquina; solo hay que volver a iniciar sesión.
 

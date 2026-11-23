@@ -349,6 +349,17 @@ def cargar_desde_carpeta(carpeta: str | Path, en_sitio: bool = False) -> dict:
     return resumen
 
 
+def _ruta_archivo(recurso: RecursoAudio) -> Path:
+    ruta = Path(recurso.ruta_archivo)
+    return ruta if ruta.is_absolute() else Path(settings.MEDIA_ROOT) / ruta
+
+
+def _se_puede_reproducir(recurso: RecursoAudio) -> bool:
+    # The file on this machine, not only the database flag: the catalog is shared, but each
+    # machine that runs music has its own copy of the files (the demo package has 25 of them).
+    return recurso.disponible and _ruta_archivo(recurso).is_file()
+
+
 def _serializar_cancion(cancion: Cancion) -> dict:
     creditos = sorted(cancion.creditos.all(), key=lambda c: c.orden)
     artistas = [{'id': str(c.artista.id), 'nombre': c.artista.nombre} for c in creditos]
@@ -359,6 +370,7 @@ def _serializar_cancion(cancion: Cancion) -> dict:
             'disponible': v.disponible,
         }
         for v in sorted(cancion.variantes.all(), key=lambda r: (0 if r.tipo == 'original' else 1))
+        if _se_puede_reproducir(v)
     ]
     return {
         'id': str(cancion.id),
@@ -386,13 +398,18 @@ def buscar_canciones(consulta: str = '', pagina_raw: str = '1') -> dict:
     if texto:
         qs = qs.filter(Q(titulo__icontains=texto) | Q(artistas__nombre__icontains=texto)).distinct()
 
-    qs = qs.order_by('titulo', 'id')
-    total = qs.count()
+    # Filtering in Python instead of SQL: whether the file exists is only known on this disk.
+    # A song nobody can play here, once added, would stop the queue for everyone (RF-24).
+    # shortcut: one stat per song on each search, fine for a few hundred; store availability
+    # per machine if the catalog grows to thousands.
+    canciones = [c for c in qs.order_by('titulo', 'id')
+                 if any(_se_puede_reproducir(v) for v in c.variantes.all())]
+    total = len(canciones)
     total_paginas = math.ceil(total / TAMANO_PAGINA) if total > 0 else 0
 
     inicio = (pagina - 1) * TAMANO_PAGINA
     fin = inicio + TAMANO_PAGINA
-    resultados = [_serializar_cancion(c) for c in qs[inicio:fin]]
+    resultados = [_serializar_cancion(c) for c in canciones[inicio:fin]]
 
     return {
         'resultados': resultados,
@@ -441,11 +458,8 @@ def resolver_archivo_recurso(recurso_id) -> tuple[RecursoAudio, Path]:
     if not recurso.disponible:
         raise ErrorApi(410, 'AUDIO_NO_DISPONIBLE', 'Este audio ya no está disponible.')
 
-    ruta = Path(recurso.ruta_archivo)
-    if not ruta.is_absolute():
-        ruta = Path(settings.MEDIA_ROOT) / ruta
-
-    if not ruta.exists() or not ruta.is_file():
+    ruta = _ruta_archivo(recurso)
+    if not ruta.is_file():
         raise ErrorApi(410, 'AUDIO_NO_DISPONIBLE', 'El archivo de audio no se encuentra en el servidor.')
 
     return recurso, ruta
