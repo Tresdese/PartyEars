@@ -115,6 +115,10 @@ class _PartyEnCursoState extends State<PartyEnCurso> {
                     Text(_sesion.party.nombre, style: Theme.of(context).textTheme.headlineMedium),
                     const SizedBox(height: 8),
                     _Conexion(estado: _sesion.conexion, cierre: _sesion.cierre),
+                    if (_sesion.cambioAnfitrion case final cambio?) ...[
+                        const SizedBox(height: 8),
+                        _AvisoAnfitrion(nuevo: cambio.nuevo, anteriorDesconectado: cambio.anteriorDesconectado, movil: _esMovil),
+                    ],
                     const SizedBox(height: 16),
                     if (_sesion.party.codigo != null)
                         ListTile(
@@ -345,3 +349,22 @@ class _Aviso extends StatelessWidget {
     }
 }
 
+class _AvisoAnfitrion extends StatelessWidget {
+    const _AvisoAnfitrion({required this.nuevo, required this.anteriorDesconectado, required this.movil});
+
+    final String nuevo;
+    final bool anteriorDesconectado;
+    final bool movil;
+
+    @override
+    Widget build(BuildContext context) {
+        final texto = anteriorDesconectado && !movil
+            ? 'Anfitrión desconectado: $nuevo es el sucesor por orden de ingreso'
+            : 'Nuevo anfitrión: $nuevo';
+        return Row(children: [
+            const Icon(Icons.info_outline, size: 18, color: AppColors.muted),
+            const SizedBox(width: 8),
+            Expanded(child: Text(texto)),
+        ]);
+    }
+}

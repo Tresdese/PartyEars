@@ -81,6 +81,7 @@ class SesionParty extends ChangeNotifier {
     bool _meSacaron = false;
     Timer? _timerReingreso;
     static const _esperaReingreso = Duration(seconds: 3);
+    ({String nuevo, bool anteriorDesconectado})? cambioAnfitrion; Timer? _timerCambioAnfitrion; static const _duracionCambioAnfitrion = Duration(seconds: 10);
     final _suscripciones = <StreamSubscription<Object?>>[];
     Timer? _timerReloj;
     Timer? _pings;
@@ -224,6 +225,7 @@ class SesionParty extends ChangeNotifier {
                     final esSalida = evento.tipo == 'miembro.salida' || evento.tipo == 'miembro.expulsado';
                     if (esSalida && evento.datos['usuario_id'] == usuarioId) _meSacaron = true;
                     await _pedirParty();
+                    if (evento.tipo == 'anfitrion.cambio') _avisarSucesion(evento.datos);
                 }
         }
     }
@@ -264,6 +266,16 @@ class SesionParty extends ChangeNotifier {
                 _ => WsMotivoCierre.sinAcceso,
             });
         }
+    }
+
+    void _avisarSucesion(Map<String, dynamic> datos) {
+        if (datos['motivo'] != 'sucesion') return;
+        final nuevo = _party.miembro(datos['nuevo_id'] as String?);
+        if (nuevo == null) return;
+        final anterior = _party.miembro(datos['anterior_id'] as String?);
+        _timerCambioAnfitrion?.cancel();
+        _cambiar(() => cambioAnfitrion = (nuevo: nuevo.nombreVisible, anteriorDesconectado: anterior != null && !anterior.conectado));
+        _timerCambioAnfitrion = Timer(_duracionCambioAnfitrion, () => _cambiar(() => cambioAnfitrion = null));
     }
 
     void _medirReloj(int veces) {
@@ -358,6 +370,7 @@ class SesionParty extends ChangeNotifier {
         _cerrada = true;
         _timerReloj?.cancel();
         _timerReingreso?.cancel();
+        _timerCambioAnfitrion?.cancel();
         _pings?.cancel();
         if (!_relojListo.isCompleted) _relojListo.complete();
         sincronizador.cerrar();
