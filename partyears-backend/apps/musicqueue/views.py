@@ -6,9 +6,11 @@ from rest_framework.views import APIView
 from apps.parties.errores import datos_invalidos
 from .cliente_party import consultar_party
 from .servicios import (OPERACION_AGREGAR, OPERACION_REORDENAR, OPERACION_REPRODUCCION,
-                        OPERACION_RETIRAR, OPERACION_TERMINADA, agregar_elemento,
-                        cambiar_reproduccion, consultar_cola, leer_clave_idempotencia,
-                        reordenar_elemento, retirar_elemento, terminar_elemento)
+                        OPERACION_RETIRAR, OPERACION_TERMINADA, agregar_a_mi_cola,
+                        agregar_elemento, cambiar_mi_reproduccion, cambiar_reproduccion,
+                        consultar_cola, consultar_mi_cola, leer_clave_idempotencia,
+                        reordenar_elemento, reordenar_en_mi_cola, retirar_de_mi_cola,
+                        retirar_elemento, terminar_elemento, terminar_en_mi_cola)
 
 ACCIONES = ('iniciar', 'pausar', 'reanudar', 'buscar', 'saltar')
 
@@ -40,6 +42,21 @@ def leer_version(valor):
     return valor
 
 
+def leer_recurso(cuerpo):
+    cuerpo = leer_objeto(cuerpo)
+    return leer_uuid(cuerpo.get('recurso_audio_id'), 'recurso_audio_id',
+                     'La canción no es válida.')
+
+
+def leer_reordenamiento(cuerpo):
+    cuerpo = leer_objeto(cuerpo)
+    posicion = cuerpo.get('nueva_posicion')
+    if not _es_entero(posicion) or posicion < 1:
+        raise datos_invalidos('La nueva posición no es válida.', 'nueva_posicion',
+                              ['Debe ser un entero desde 1.'])
+    return posicion, leer_version(cuerpo.get('version_esperada'))
+
+
 class ColaView(APIView):
     """GET /api/v1/queue/parties/{party_id}/cola."""
 
@@ -54,9 +71,7 @@ class ElementosView(APIView):
 
     def post(self, request, party_id):
         clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
-        cuerpo = leer_objeto(request.data)
-        recurso = leer_uuid(cuerpo.get('recurso_audio_id'), 'recurso_audio_id',
-                            'La canción no es válida.')
+        recurso = leer_recurso(request.data)
         party = consultar_party(request.auth, party_id)
         estado, codigo_http = agregar_elemento(party, request.user.id, recurso, clave)
         return Response(estado, status=codigo_http)
@@ -68,12 +83,7 @@ class ElementoView(APIView):
 
     def patch(self, request, party_id, elemento_id):
         clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
-        cuerpo = leer_objeto(request.data)
-        posicion = cuerpo.get('nueva_posicion')
-        if not _es_entero(posicion) or posicion < 1:
-            raise datos_invalidos('La nueva posición no es válida.', 'nueva_posicion',
-                                  ['Debe ser un entero desde 1.'])
-        version = leer_version(cuerpo.get('version_esperada'))
+        posicion, version = leer_reordenamiento(request.data)
         party = consultar_party(request.auth, party_id)
         estado, codigo_http = reordenar_elemento(party, request.user.id, elemento_id, posicion,
                                                  version, clave)
@@ -128,4 +138,58 @@ class TerminadaView(APIView):
         clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
         party = consultar_party(request.auth, party_id)
         estado, codigo_http = terminar_elemento(party, request.user.id, elemento_id, clave)
+        return Response(estado, status=codigo_http)
+
+
+class MiColaView(APIView):
+    """GET /api/v1/queue/mi-cola (contrato 5.1). Solo su dueño la ve: sale del token."""
+
+    def get(self, request):
+        return Response(consultar_mi_cola(request.user.id))
+
+
+class MisElementosView(APIView):
+    """POST /api/v1/queue/mi-cola/elementos (RF-05)."""
+
+    def post(self, request):
+        clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
+        recurso = leer_recurso(request.data)
+        estado, codigo_http = agregar_a_mi_cola(request.user.id, recurso, clave)
+        return Response(estado, status=codigo_http)
+
+
+class MiElementoView(APIView):
+    """PATCH y DELETE /api/v1/queue/mi-cola/elementos/{elemento_id}."""
+
+    def patch(self, request, elemento_id):
+        clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
+        posicion, version = leer_reordenamiento(request.data)
+        estado, codigo_http = reordenar_en_mi_cola(request.user.id, elemento_id, posicion,
+                                                   version, clave)
+        return Response(estado, status=codigo_http)
+
+    def delete(self, request, elemento_id):
+        clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
+        version = leer_version(request.query_params.get('version_esperada'))
+        estado, codigo_http = retirar_de_mi_cola(request.user.id, elemento_id, version, clave)
+        return Response(estado, status=codigo_http)
+
+
+class MiReproduccionView(APIView):
+    """POST /api/v1/queue/mi-cola/reproduccion (CU-25)."""
+
+    def post(self, request):
+        clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
+        accion, elemento_id, posicion = validar_reproduccion(request.data)
+        estado, codigo_http = cambiar_mi_reproduccion(request.user.id, accion, elemento_id,
+                                                      posicion, clave)
+        return Response(estado, status=codigo_http)
+
+
+class MiTerminadaView(APIView):
+    """POST /api/v1/queue/mi-cola/elementos/{elemento_id}/terminada (CU-26)."""
+
+    def post(self, request, elemento_id):
+        clave = leer_clave_idempotencia(request.headers.get('Idempotency-Key'))
+        estado, codigo_http = terminar_en_mi_cola(request.user.id, elemento_id, clave)
         return Response(estado, status=codigo_http)
