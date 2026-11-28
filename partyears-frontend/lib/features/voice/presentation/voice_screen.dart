@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/demo_data.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/common.dart';
 
@@ -34,8 +33,8 @@ class _VoiceScreenState extends State<VoiceScreen> {
 
   List<_VoiceMember> get _members => [
         _VoiceMember(
-          initials: demoUserInitials,
-          name: demoUserName,
+          initials: 'TÚ',
+          name: 'Tú',
           role: 'Anfitrión',
           speaking: _micOn,
           isSelf: true,
@@ -142,7 +141,7 @@ class _VoiceScreenState extends State<VoiceScreen> {
             ),
             SizedBox(height: 2),
             Text(
-              'Canal de voz · Código $demoPartyCode',
+              'Canal de voz de la party',
               style: TextStyle(color: AppColors.muted, fontSize: 12),
             ),
           ],

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../../core/network/api_exception.dart';
 import '../../../core/widgets/common.dart';
-import '../../queue/presentation/queue_screen.dart';
 import '../../voice/presentation/voice_screen.dart';
 import '../data/party_models.dart';
 import 'party_en_curso.dart';
@@ -194,14 +193,6 @@ class _PartyScreenState extends State<PartyScreen> {
                 tooltip: 'Copiar código',
                 onPressed: () => copyPartyCode(context, code),
                 icon: const Icon(Icons.copy_outlined),
-            ),
-        ),
-        ListTile(
-            leading: const Icon(Icons.queue_music),
-            title: const Text('Cola de reproducción'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const QueueScreen()),
             ),
         ),
         ListTile(
