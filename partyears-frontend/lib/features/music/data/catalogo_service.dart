@@ -103,10 +103,6 @@ class CatalogoService {
         return PaginaCatalogo.desdeJson(respuesta is Map<String, dynamic> ? respuesta : const {});
     }
 
-    // TODO(T-56): P-06 shows only the first page; switch it to buscarPagina with "Cargar más"
-    // like the music screen.
-    Future<List<CancionCatalogo>> buscar(String texto) async => (await buscarPagina(texto)).resultados;
-
     Future<DetalleRecurso> detalle(String recursoAudioId) async {
         final respuesta = await _api.get(Servicio.music, '/recursos/$recursoAudioId');
         return DetalleRecurso.desdeJson(Map<String, dynamic>.from(respuesta as Map));

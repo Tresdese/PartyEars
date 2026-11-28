@@ -27,7 +27,13 @@ final _catalogo = [
     ]),
 ];
 
-const _errorRed = ApiException(codigo: ApiException.sinConexion, mensaje: 'sin red', idempotencyKey: 'clave-1');
+/// Una sola página: [_catalogo], o vacía si se busca 'zzz'.
+Future<PaginaCatalogo> _buscarUnaPagina(String texto, int pagina) async => PaginaCatalogo(
+    resultados: texto == 'zzz' ? [] : _catalogo, pagina: 1, totalPaginas: texto == 'zzz' ? 0 : 1,
+    total: texto == 'zzz' ? 0 : _catalogo.length,
+);
+
+const _errorRed =ApiException(codigo: ApiException.sinConexion, mensaje: 'sin red', idempotencyKey: 'clave-1');
 
 void main() {
     late PartyServiceFalso partyService;
@@ -38,7 +44,7 @@ void main() {
         colaService = ColaServiceFalsa();
         return SesionParty(party: party, partyService: partyService, colaService: colaService, ws: WsConectado(),
                            reproductor: ReproductorFalso(), abrirAudio: (_, _) async {}, usuarioId: usuario,
-                           buscarCanciones: (texto) async => texto == 'zzz' ? [] : _catalogo);
+                           buscarCanciones: _buscarUnaPagina);
     }
 
     group('agregar (CU-11)', () {
@@ -142,7 +148,7 @@ void main() {
         testWidgets('P-06: busca, marca lo no disponible y agrega', (tester) async {
             final agregadas = <String>[];
             await tester.pumpWidget(MaterialApp(home: AgregarCancionScreen(
-                buscar: (texto) async => texto == 'zzz' ? [] : _catalogo,
+                buscar: _buscarUnaPagina,
                 agregar: (r) async {
                     agregadas.add(r);
                     return 'Canción agregada a la cola';
@@ -161,6 +167,29 @@ void main() {
             await tester.pump(const Duration(milliseconds: 350));
             await tester.pump();
             expect(find.text('No se encontraron canciones'), findsOneWidget);
+        });
+
+        testWidgets('P-06: "Cargar más" agrega la página siguiente', (tester) async {
+            CancionCatalogo cancion(String titulo) => CancionCatalogo(titulo: titulo, artistas: const ['A'], duracionMs: 1000,
+                variantes: [VarianteAudio(recursoAudioId: titulo, tipo: 'original', disponible: true)]);
+            final pedidas = <int>[];
+            await tester.pumpWidget(MaterialApp(home: AgregarCancionScreen(
+                buscar: (texto, pagina) async {
+                    pedidas.add(pagina);
+                    return PaginaCatalogo(resultados: [cancion('Página $pagina')], pagina: pagina, totalPaginas: 2, total: 2);
+                },
+                agregar: (_) async => '',
+            )));
+            await tester.pump();
+            expect(find.text('Página 1'), findsOneWidget);
+
+            await tester.tap(find.text('Cargar más'));
+            await tester.pump();
+            await tester.pump();
+            expect(pedidas, [1, 2]);
+            expect(find.text('Página 1'), findsOneWidget);
+            expect(find.text('Página 2'), findsOneWidget);
+            expect(find.text('Cargar más'), findsNothing);
         });
     });
 }
