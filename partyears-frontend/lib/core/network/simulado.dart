@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'api_client.dart';
 import 'api_config.dart';
 import 'api_exception.dart';
@@ -7,6 +8,12 @@ import 'uuid.dart';
 import 'ws_client.dart';
 
 String _iso(DateTime d) => DateTime.fromMillisecondsSinceEpoch(d.millisecondsSinceEpoch, isUtc: true,).toIso8601String();
+
+// Shaped like a real JWT instead of a plain id: the screens read sub and nombre_usuario from it.
+String _tokenSimulado(Map<String, String> usuario) {
+    String parte(Map<String, Object?> datos) => base64Url.encode(utf8.encode(jsonEncode(datos))).replaceAll('=', '');
+    return '${parte({'alg': 'none'})}.${parte({'sub': usuario['id'], 'nombre_usuario': usuario['nombre_usuario']})}.simulado-${nuevoUuid()}';
+}
 
 class MockApiClient implements ApiClient {
     MockApiClient({this.latencia = const Duration(milliseconds: 300)});
@@ -21,6 +28,8 @@ class MockApiClient implements ApiClient {
     String? _usuarioActual;
     
     Map<String, dynamic>? _party;
+
+    final _miCola = MiColaSimulada();
 
     late final List<Map<String, dynamic>> _catalogo = [
         _cancion(1, 'Noche de Neón', 'Luna Roja', 215000, instrumental: true),
@@ -107,6 +116,10 @@ class MockApiClient implements ApiClient {
 
         if (consulta != null && _party != null && _party!['id'] == consulta.group(1)) return _party;
 
+        if (operacion.startsWith('GET music/recursos/')) return _detalleRecurso(operacion.split('/').last);
+
+        if (operacion.contains('queue/mi-cola')) return _miCola.atender(operacion, query, datos, _usuarioActual!);
+
         if (RegExp(r'^GET queue/parties/([^/]+)/cola$').hasMatch(operacion)) {
             return {'id': 'cola-simulada', 'modalidad': 'compartida', 'version': 0, 'actual': null, 'pendientes': <Object>[]};
         }
@@ -168,7 +181,7 @@ class MockApiClient implements ApiClient {
 
     Future<Map<String, dynamic>> _abrirSesion(Map<String, String> usuario) async {
         final json = <String, dynamic>{
-            'token_acceso': 'simulado.${nuevoUuid()}',
+            'token_acceso': _tokenSimulado(usuario),
             'token_renovacion': nuevoUuid(),
             'expira_en': _iso(DateTime.now().add(const Duration(minutes: 5))),
             'usuario': {'id': usuario['id'], 'nombre_usuario': usuario['nombre_usuario']},
@@ -193,6 +206,19 @@ class MockApiClient implements ApiClient {
 
         return {'resultados': coincidencias.skip((pagina - 1) * 20).take(20).toList(), 'pagina': pagina,
                 'total_paginas': (coincidencias.length / 20).ceil(), 'total': coincidencias.length,};
+    }
+
+    Map<String, dynamic> _detalleRecurso(String recursoId) {
+        for (final cancion in _catalogo) {
+            for (final v in cancion['variantes'] as List) {
+                final variante = v as Map;
+                if (variante['recurso_audio_id'] != recursoId) continue;
+                return {'recurso_audio_id': recursoId, 'tipo': variante['tipo'], 'disponible': true,
+                        'cancion': {'id': cancion['id'], 'titulo': cancion['titulo'], 'duracion_ms': cancion['duracion_ms'],
+                                    'artistas': cancion['artistas']}};
+            }
+        }
+        throw const ApiException(codigo: 'NO_ENCONTRADO', mensaje: 'El recurso de audio solicitado no existe.', estadoHttp: 404);
     }
 
     Map<String, dynamic> _crearParty(Map<String, dynamic> datos) {
@@ -333,5 +359,168 @@ class WsSimulado implements WsClient {
         _estadoActual = nuevo;
         
         if (!_estadoCtrl.isClosed) _estadoCtrl.add(nuevo);
+    }
+}
+/// Cola individual en memoria con las reglas del contrato 5.1: versión, avance único y
+/// elementos que solo se mueven mientras están pendientes.
+class MiColaSimulada {
+    final _colas = <String, _ColaSimulada>{};
+
+    dynamic atender(String operacion, Map<String, String>? query, Map<String, dynamic> datos, String usuarioId) {
+        final cola = _colas.putIfAbsent(usuarioId, () => _ColaSimulada(usuarioId));
+        final partes = operacion.split(' ');
+        final ruta = partes[1].split('/');
+        final elementoId = ruta.length > 3 ? ruta[3] : null;
+
+        switch ((partes[0], ruta.length > 2 ? ruta[2] : '', ruta.length > 4 ? ruta[4] : '')) {
+            case ('GET', '', ''):
+                return cola.estado();
+            case ('POST', 'elementos', ''):
+                return cola.agregar(datos['recurso_audio_id'] as String);
+            case ('PATCH', 'elementos', ''):
+                return cola.reordenar(elementoId!, datos['nueva_posicion'] as int, datos['version_esperada'] as int);
+            case ('DELETE', 'elementos', ''):
+                return cola.retirar(elementoId!, int.parse(query?['version_esperada'] ?? '-1'));
+            case ('POST', 'reproduccion', ''):
+                return cola.reproduccion(datos['accion'] as String, datos['elemento_id'] as String?, datos['posicion_ms'] as int?);
+            case ('POST', 'elementos', 'terminada'):
+                return cola.terminada(elementoId!);
+        }
+        throw ApiException(codigo: 'NO_ENCONTRADO', mensaje: 'El modo simulado no tiene esta operación: $operacion', estadoHttp: 404);
+    }
+}
+
+class _ColaSimulada {
+    _ColaSimulada(this.usuarioId);
+
+    final String usuarioId;
+    final id = nuevoUuid();
+    final _elementos = <Map<String, dynamic>>[];
+    int version = 0;
+    int _orden = 0;
+
+    Iterable<Map<String, dynamic>> get _pendientes => _elementos.where((e) => e['estado'] == 'pendiente');
+
+    Map<String, dynamic>? get _actual {
+        for (final e in _elementos) {
+            if (e['estado'] == 'reproduciendo' || e['estado'] == 'pausada') return e;
+        }
+        return null;
+    }
+
+    Map<String, dynamic> _publico(Map<String, dynamic> e) => {
+        'id': e['id'], 'recurso_audio_id': e['recurso_audio_id'], 'agregado_por': usuarioId, 'orden': e['orden'],
+        'estado': e['estado'], 'agregado_en': e['agregado_en'],
+    };
+
+    Map<String, dynamic> _reproduccion() {
+        final actual = _actual;
+        return {
+            'cola_id': id, 'version': version, 'elemento_id': actual?['id'], 'recurso_audio_id': actual?['recurso_audio_id'],
+            'estado': actual?['estado'] ?? 'detenida', 'posicion_base_ms': actual?['posicion_base_ms'] ?? 0,
+            'referencia_en': actual == null ? null : _iso(DateTime.now()), 'duracion_ms': null,
+        };
+    }
+
+    Map<String, dynamic> estado() {
+        final actual = _actual;
+        return {
+            'id': id, 'modalidad': 'individual', 'version': version,
+            'actual': actual == null ? null : {'elemento': _publico(actual), 'reproduccion': _reproduccion()},
+            'pendientes': [for (final e in _pendientes) _publico(e)],
+        };
+    }
+
+    Map<String, dynamic> agregar(String recursoId) {
+        _elementos.add({'id': nuevoUuid(), 'recurso_audio_id': recursoId, 'orden': ++_orden, 'estado': 'pendiente',
+                        'agregado_en': _iso(DateTime.now()), 'posicion_base_ms': 0});
+        version++;
+        return estado();
+    }
+
+    Map<String, dynamic> _pendiente(String elementoId, int versionEsperada) {
+        if (versionEsperada != version) {
+            throw ApiException(codigo: 'VERSION_OBSOLETA', mensaje: 'La cola cambió. Recarga para ver la actual.',
+                               detalles: {'version_actual': version}, estadoHttp: 409);
+        }
+        final elemento = _elementos.where((e) => e['id'] == elementoId).firstOrNull;
+        if (elemento == null) {
+            throw const ApiException(codigo: 'NO_ENCONTRADO', mensaje: 'Esa canción ya no está en la cola.', estadoHttp: 404);
+        }
+        if (elemento['estado'] != 'pendiente') {
+            throw const ApiException(codigo: 'ELEMENTO_NO_PENDIENTE', mensaje: 'Solo se pueden mover o quitar canciones que no han sonado.',
+                                     estadoHttp: 409);
+        }
+        return elemento;
+    }
+
+    Map<String, dynamic> reordenar(String elementoId, int nuevaPosicion, int versionEsperada) {
+        final elemento = _pendiente(elementoId, versionEsperada);
+        final pendientes = _pendientes.toList();
+        if (nuevaPosicion < 1 || nuevaPosicion > pendientes.length) {
+            throw const ApiException(codigo: 'DATOS_INVALIDOS', mensaje: 'Esa posición no existe en la cola.', estadoHttp: 400);
+        }
+        final ordenes = [for (final e in pendientes) e['orden'] as int];
+        pendientes
+            ..remove(elemento)
+            ..insert(nuevaPosicion - 1, elemento);
+        for (var i = 0; i < pendientes.length; i++) {
+            pendientes[i]['orden'] = ordenes[i];
+        }
+        _elementos.sort((a, b) => (a['orden'] as int).compareTo(b['orden'] as int));
+        version++;
+        return estado();
+    }
+
+    Map<String, dynamic> retirar(String elementoId, int versionEsperada) {
+        _pendiente(elementoId, versionEsperada)['estado'] = 'retirada';
+        version++;
+        return estado();
+    }
+
+    void _iniciarSiguiente() {
+        final siguiente = _pendientes.firstOrNull;
+        if (siguiente == null) return;
+        siguiente['estado'] = 'reproduciendo';
+        siguiente['posicion_base_ms'] = 0;
+    }
+
+    Map<String, dynamic> reproduccion(String accion, String? elementoId, int? posicionMs) {
+        final actual = _actual;
+        if (accion == 'iniciar') {
+            if (actual != null) {
+                throw const ApiException(codigo: 'REPRODUCCION_EN_CURSO', mensaje: 'Ya hay una canción sonando.', estadoHttp: 409);
+            }
+            if (_pendientes.isEmpty) {
+                throw const ApiException(codigo: 'COLA_VACIA', mensaje: 'Agrega una canción a la cola para empezar.', estadoHttp: 409);
+            }
+            _iniciarSiguiente();
+        } else {
+            if (actual == null || actual['id'] != elementoId) {
+                throw const ApiException(codigo: 'ELEMENTO_NO_ACTUAL', mensaje: 'Esa canción ya no es la que está sonando.', estadoHttp: 409);
+            }
+            switch (accion) {
+                case 'pausar':
+                    actual['estado'] = 'pausada';
+                case 'reanudar':
+                    actual['estado'] = 'reproduciendo';
+                case 'buscar':
+                    actual['posicion_base_ms'] = posicionMs ?? 0;
+                case 'saltar':
+                    actual['estado'] = 'omitida';
+                    _iniciarSiguiente();
+            }
+        }
+        version++;
+        return _reproduccion();
+    }
+
+    Map<String, dynamic> terminada(String elementoId) {
+        final actual = _actual;
+        if (actual == null || actual['id'] != elementoId) return _reproduccion();
+        actual['estado'] = 'reproducida';
+        _iniciarSiguiente();
+        version++;
+        return _reproduccion();
     }
 }

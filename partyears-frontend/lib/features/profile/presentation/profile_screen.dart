@@ -1,20 +1,20 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/demo_data.dart';
+import '../../../core/network/sesion_usuario.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/common.dart';
 import '../../party/sincronizacion.dart';
 
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key});
+  const ProfileScreen({super.key, this.usuario});
+
+  final UsuarioSesion? usuario;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  static const _email = '$demoUserName@ejemplo.com';
-
   bool _notifications = true;
   bool _autoplay = true;
   bool _highQuality = false;
@@ -94,9 +94,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               shape: BoxShape.circle,
               gradient: AppColors.primaryGradient,
             ),
-            child: const Text(
-              demoUserInitials,
-              style: TextStyle(
+            child: Text(
+              widget.usuario?.iniciales ?? '',
+              style: const TextStyle(
                 color: Colors.white,
                 fontSize: 29,
                 fontWeight: FontWeight.w800,
@@ -104,22 +104,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
           const SizedBox(height: 14),
-          const Text(
-            demoUserName,
-            style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 2),
-          const Text(
-            _email,
-            style: TextStyle(color: AppColors.muted, fontSize: 12),
+          Text(
+            widget.usuario?.nombreUsuario ?? '',
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 12),
           const StatusBadge(label: 'Cuenta activa'),
           const SizedBox(height: 20),
           const Divider(height: 1),
-          const _InfoRow(label: 'Miembro desde', value: 'Octubre 2026'),
-          const _InfoRow(label: 'Parties creadas', value: '05'),
-          const _InfoRow(label: 'Rol actual', value: 'Anfitrión', last: true),
           const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
@@ -216,43 +208,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             description: 'Tema de la interfaz',
             trailing: _ValuePill(value: 'Oscuro'),
             last: true,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _InfoRow extends StatelessWidget {
-  const _InfoRow({
-    required this.label,
-    required this.value,
-    this.last = false,
-  });
-
-  final String label;
-  final String value;
-  final bool last;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 14),
-      decoration: BoxDecoration(
-        border: last
-            ? null
-            : const Border(bottom: BorderSide(color: AppColors.border)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(color: AppColors.muted, fontSize: 12),
-          ),
-          Text(
-            value,
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
           ),
         ],
       ),

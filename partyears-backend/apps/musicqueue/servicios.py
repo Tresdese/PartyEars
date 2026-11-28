@@ -29,6 +29,8 @@ ACCIONES_DEL_ANFITRION = ('iniciar', 'pausar', 'reanudar', 'buscar')
 ESTADOS_VISIBLES = ('pendiente', 'reproduciendo', 'pausada')
 PERMISO_APORTAR = 'puede_aportar'
 PERMISO_MODIFICAR = 'puede_modificar_cola'
+CAMPO_PARTY = 'party_id'
+CAMPO_USUARIO = 'usuario_id'
 
 
 def fecha_iso(valor):
@@ -68,22 +70,45 @@ def exigir_permiso(party, usuario_id, permiso):
         raise ErrorApi(403, 'SIN_PERMISO', 'No tienes permiso para cambiar la cola.')
 
 
-def _crear_cola_si_falta(party_id):
+def _de_party(party_id):
+    return (CAMPO_PARTY, str(party_id))
+
+
+def _de_usuario(usuario_id):
+    return (CAMPO_USUARIO, str(usuario_id))
+
+
+def _crear_cola_si_falta(propietario):
     # ON CONFLICT instead of get_or_create: two first requests at once would both try to insert.
+    campo, valor = propietario
+    if campo == CAMPO_PARTY:
+        sql = ('INSERT INTO queue.cola (party_id, version_party) VALUES (%s, 0) '
+               'ON CONFLICT (party_id) DO NOTHING')
+    else:
+        sql = 'INSERT INTO queue.cola (usuario_id) VALUES (%s) ON CONFLICT (usuario_id) DO NOTHING'
     with connection.cursor() as cursor:
-        cursor.execute('INSERT INTO queue.cola (party_id, version_party) VALUES (%s, 0) '
-                       'ON CONFLICT (party_id) DO NOTHING', [party_id])
+        cursor.execute(sql, [valor])
 
 
-def _bloquear_cola(party_id):
-    _crear_cola_si_falta(party_id)
-    return Cola.objects.select_for_update().get(party_id=party_id)
+def _bloquear_cola(propietario):
+    _crear_cola_si_falta(propietario)
+    campo, valor = propietario
+    return Cola.objects.select_for_update().get(**{campo: valor})
 
 
 def _bloquear_clave(actor_id, clave):
     with connection.cursor() as cursor:
         cursor.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))',
                        [f'{actor_id}:{clave}'])
+
+
+def _es_compartida(cola):
+    return cola.party_id is not None
+
+
+def _adelanto(cola):
+    # No lead for the individual queue: there is a single client, nobody to wait for.
+    return ADELANTO_ARRANQUE if _es_compartida(cola) else timedelta(0)
 
 
 def formatear_elemento(elemento):
@@ -122,7 +147,7 @@ def estado_cola(cola):
     actual = next((e for e in elementos if e.estado != 'pendiente'), None)
     return {
         'id': str(cola.id),
-        'modalidad': 'compartida',
+        'modalidad': 'compartida' if _es_compartida(cola) else 'individual',
         'version': cola.version,
         'actual': None if actual is None else {'elemento': formatear_elemento(actual),
                                                'reproduccion': estado_reproduccion(cola, actual)},
@@ -130,9 +155,19 @@ def estado_cola(cola):
     }
 
 
+def _consultar(propietario):
+    _crear_cola_si_falta(propietario)
+    campo, valor = propietario
+    return estado_cola(Cola.objects.get(**{campo: valor}))
+
+
 def consultar_cola(party_id):
-    _crear_cola_si_falta(party_id)
-    return estado_cola(Cola.objects.get(party_id=party_id))
+    return _consultar(_de_party(party_id))
+
+
+def consultar_mi_cola(usuario_id):
+    """Contrato 5.1: la cola individual se crea la primera vez que se consulta."""
+    return _consultar(_de_usuario(usuario_id))
 
 
 def _operacion_previa(actor_id, clave, solicitud):
@@ -157,6 +192,9 @@ def _registrar_operacion(cola, usuario_id, clave, operacion, solicitud, codigo_h
         codigo_respuesta=codigo_http, resultado={'cola_id': str(cola.id), 'version': cola.version},
         confirmada_en=ahora,
     )
+    if not _es_compartida(cola):
+        # Not for the individual queue: RF-34 traces party operations, and this one has none.
+        return
     # Outbox only instead of _emitir: this copy is for logs (RF-34), not for the clients.
     EventoSalida.objects.create(
         agregado_id=cola.id, version=cola.version, tipo=TIPO_OPERACION, creado_en=ahora,
@@ -184,6 +222,9 @@ def _avisar_en_vivo(evento, party_id):
 
 
 def _emitir(cola, tipo, datos, ahora):
+    if not _es_compartida(cola):
+        # Contract 5.1: no WebSocket for the individual queue, each response carries its state.
+        return
     evento = EventoSalida.objects.create(agregado_id=cola.id, version=cola.version, tipo=tipo,
                                          datos=datos, creado_en=ahora)
     # After commit instead of right away: a rolled back change must never reach the clients.
@@ -207,14 +248,12 @@ def _elemento_pendiente(cola, elemento_id):
     return elemento
 
 
-@transaction.atomic
-def agregar_elemento(party, usuario_id, recurso_audio_id, clave):
-    """RF-11. Se agrega al final y no inicia la reproducción. Devuelve (estado, código HTTP)."""
-    exigir_permiso(party, usuario_id, PERMISO_APORTAR)
+def _agregar(propietario, usuario_id, recurso_audio_id, clave):
     _bloquear_clave(usuario_id, clave)
-    solicitud = huella({'operacion': OPERACION_AGREGAR, 'party_id': party['id'],
+    campo, valor = propietario
+    solicitud = huella({'operacion': OPERACION_AGREGAR, campo: valor,
                         'recurso_audio_id': recurso_audio_id})
-    cola = _bloquear_cola(party['id'])
+    cola = _bloquear_cola(propietario)
     previa = _operacion_previa(usuario_id, clave, solicitud)
     if previa is not None:
         return estado_cola(cola), previa.codigo_respuesta
@@ -228,14 +267,25 @@ def agregar_elemento(party, usuario_id, recurso_audio_id, clave):
 
 
 @transaction.atomic
-def reordenar_elemento(party, usuario_id, elemento_id, nueva_posicion, version_esperada, clave):
-    """RF-12. nueva_posicion cuenta desde 1 dentro de los pendientes."""
-    exigir_permiso(party, usuario_id, PERMISO_MODIFICAR)
+def agregar_elemento(party, usuario_id, recurso_audio_id, clave):
+    """RF-11. Se agrega al final y no inicia la reproducción. Devuelve (estado, código HTTP)."""
+    exigir_permiso(party, usuario_id, PERMISO_APORTAR)
+    return _agregar(_de_party(party['id']), usuario_id, recurso_audio_id, clave)
+
+
+@transaction.atomic
+def agregar_a_mi_cola(usuario_id, recurso_audio_id, clave):
+    """RF-05. Igual que en la party, sin permisos: la cola es del propio usuario."""
+    return _agregar(_de_usuario(usuario_id), usuario_id, recurso_audio_id, clave)
+
+
+def _reordenar(propietario, usuario_id, elemento_id, nueva_posicion, version_esperada, clave):
     _bloquear_clave(usuario_id, clave)
-    solicitud = huella({'operacion': OPERACION_REORDENAR, 'party_id': party['id'],
+    campo, valor = propietario
+    solicitud = huella({'operacion': OPERACION_REORDENAR, campo: valor,
                         'elemento_id': str(elemento_id), 'nueva_posicion': nueva_posicion,
                         'version_esperada': version_esperada})
-    cola = _bloquear_cola(party['id'])
+    cola = _bloquear_cola(propietario)
     previa = _operacion_previa(usuario_id, clave, solicitud)
     if previa is not None:
         return estado_cola(cola), previa.codigo_respuesta
@@ -261,13 +311,25 @@ def reordenar_elemento(party, usuario_id, elemento_id, nueva_posicion, version_e
 
 
 @transaction.atomic
-def retirar_elemento(party, usuario_id, elemento_id, version_esperada, clave):
-    """RF-13. Pasa el elemento a 'retirada'; el historial no se borra."""
+def reordenar_elemento(party, usuario_id, elemento_id, nueva_posicion, version_esperada, clave):
+    """RF-12. nueva_posicion cuenta desde 1 dentro de los pendientes."""
     exigir_permiso(party, usuario_id, PERMISO_MODIFICAR)
+    return _reordenar(_de_party(party['id']), usuario_id, elemento_id, nueva_posicion,
+                      version_esperada, clave)
+
+
+@transaction.atomic
+def reordenar_en_mi_cola(usuario_id, elemento_id, nueva_posicion, version_esperada, clave):
+    return _reordenar(_de_usuario(usuario_id), usuario_id, elemento_id, nueva_posicion,
+                      version_esperada, clave)
+
+
+def _retirar(propietario, usuario_id, elemento_id, version_esperada, clave):
     _bloquear_clave(usuario_id, clave)
-    solicitud = huella({'operacion': OPERACION_RETIRAR, 'party_id': party['id'],
+    campo, valor = propietario
+    solicitud = huella({'operacion': OPERACION_RETIRAR, campo: valor,
                         'elemento_id': str(elemento_id), 'version_esperada': version_esperada})
-    cola = _bloquear_cola(party['id'])
+    cola = _bloquear_cola(propietario)
     previa = _operacion_previa(usuario_id, clave, solicitud)
     if previa is not None:
         return estado_cola(cola), previa.codigo_respuesta
@@ -279,6 +341,18 @@ def retirar_elemento(party, usuario_id, elemento_id, version_esperada, clave):
     elemento.fin_en = ahora
     elemento.save(update_fields=['estado', 'fin_en'])
     return _confirmar(cola, usuario_id, clave, OPERACION_RETIRAR, solicitud, 200, ahora)
+
+
+@transaction.atomic
+def retirar_elemento(party, usuario_id, elemento_id, version_esperada, clave):
+    """RF-13. Pasa el elemento a 'retirada'; el historial no se borra."""
+    exigir_permiso(party, usuario_id, PERMISO_MODIFICAR)
+    return _retirar(_de_party(party['id']), usuario_id, elemento_id, version_esperada, clave)
+
+
+@transaction.atomic
+def retirar_de_mi_cola(usuario_id, elemento_id, version_esperada, clave):
+    return _retirar(_de_usuario(usuario_id), usuario_id, elemento_id, version_esperada, clave)
 
 
 def _posicion_actual(elemento, ahora):
@@ -305,7 +379,7 @@ def _iniciar_siguiente(cola, ahora):
         return None
     siguiente.estado = 'reproduciendo'
     siguiente.inicio_en = ahora
-    siguiente.referencia_en = ahora + ADELANTO_ARRANQUE
+    siguiente.referencia_en = ahora + _adelanto(cola)
     siguiente.posicion_base_ms = 0
     siguiente.save(update_fields=['estado', 'inicio_en', 'referencia_en', 'posicion_base_ms'])
     return siguiente
@@ -338,27 +412,22 @@ def _aplicar_accion(cola, actual, accion, posicion_ms, ahora):
         actual.referencia_en = max(ahora, actual.referencia_en)
     elif accion == 'reanudar' and actual.estado == 'pausada':
         actual.estado = 'reproduciendo'
-        actual.referencia_en = ahora + ADELANTO_ARRANQUE
+        actual.referencia_en = ahora + _adelanto(cola)
     elif accion == 'buscar':
         actual.posicion_base_ms = posicion_ms
         es_pausa = actual.estado == 'pausada'
         actual.referencia_en = max(ahora, actual.referencia_en) if es_pausa else (
-            ahora + ADELANTO_ARRANQUE)
+            ahora + _adelanto(cola))
     actual.save(update_fields=['estado', 'posicion_base_ms', 'referencia_en'])
     return actual
 
 
-@transaction.atomic
-def cambiar_reproduccion(party, usuario_id, accion, elemento_id, posicion_ms, clave):
-    """Contrato 5.3. Devuelve (estado de reproducción, código HTTP)."""
-    if accion in ACCIONES_DEL_ANFITRION:
-        exigir_anfitrion(party, usuario_id)
-    else:
-        exigir_permiso(party, usuario_id, PERMISO_MODIFICAR)
+def _cambiar_reproduccion(propietario, usuario_id, accion, elemento_id, posicion_ms, clave):
     _bloquear_clave(usuario_id, clave)
-    solicitud = huella({'operacion': OPERACION_REPRODUCCION, 'party_id': party['id'],
+    campo, valor = propietario
+    solicitud = huella({'operacion': OPERACION_REPRODUCCION, campo: valor,
                         'accion': accion, 'elemento_id': elemento_id, 'posicion_ms': posicion_ms})
-    cola = _bloquear_cola(party['id'])
+    cola = _bloquear_cola(propietario)
     previa = _operacion_previa(usuario_id, clave, solicitud)
     actual = _elemento_actual(cola)
     if previa is not None:
@@ -377,15 +446,29 @@ def cambiar_reproduccion(party, usuario_id, accion, elemento_id, posicion_ms, cl
 
 
 @transaction.atomic
-def terminar_elemento(party, usuario_id, elemento_id, clave):
-    """RF-16. Avanza una sola vez: si ya no es el actual, responde el estado sin cambiarlo."""
-    # TODO(T-14): only the host instead of any member (contract 5.3 proposal): without the
-    # duration from music the server cannot tell a real end from a member skipping songs.
-    exigir_anfitrion(party, usuario_id)
+def cambiar_reproduccion(party, usuario_id, accion, elemento_id, posicion_ms, clave):
+    """Contrato 5.3. Devuelve (estado de reproducción, código HTTP)."""
+    if accion in ACCIONES_DEL_ANFITRION:
+        exigir_anfitrion(party, usuario_id)
+    else:
+        exigir_permiso(party, usuario_id, PERMISO_MODIFICAR)
+    return _cambiar_reproduccion(_de_party(party['id']), usuario_id, accion, elemento_id,
+                                 posicion_ms, clave)
+
+
+@transaction.atomic
+def cambiar_mi_reproduccion(usuario_id, accion, elemento_id, posicion_ms, clave):
+    """Contrato 5.1: el dueño controla todas las acciones de su cola."""
+    return _cambiar_reproduccion(_de_usuario(usuario_id), usuario_id, accion, elemento_id,
+                                 posicion_ms, clave)
+
+
+def _terminar(propietario, usuario_id, elemento_id, clave):
     _bloquear_clave(usuario_id, clave)
-    solicitud = huella({'operacion': OPERACION_TERMINADA, 'party_id': party['id'],
+    campo, valor = propietario
+    solicitud = huella({'operacion': OPERACION_TERMINADA, campo: valor,
                         'elemento_id': str(elemento_id)})
-    cola = _bloquear_cola(party['id'])
+    cola = _bloquear_cola(propietario)
     previa = _operacion_previa(usuario_id, clave, solicitud)
     actual = _elemento_actual(cola)
     if previa is not None or actual is None or actual.id != elemento_id:
@@ -399,3 +482,18 @@ def terminar_elemento(party, usuario_id, elemento_id, clave):
     _emitir(cola, 'reproduccion.estado', estado, ahora)
     _emitir(cola, 'cola.actualizada', estado_cola(cola), ahora)
     return estado, 200
+
+
+@transaction.atomic
+def terminar_elemento(party, usuario_id, elemento_id, clave):
+    """RF-16. Avanza una sola vez: si ya no es el actual, responde el estado sin cambiarlo."""
+    # TODO(T-14): only the host instead of any member (contract 5.3 proposal): without the
+    # duration from music the server cannot tell a real end from a member skipping songs.
+    exigir_anfitrion(party, usuario_id)
+    return _terminar(_de_party(party['id']), usuario_id, elemento_id, clave)
+
+
+@transaction.atomic
+def terminar_en_mi_cola(usuario_id, elemento_id, clave):
+    """CU-26: al terminar una canción de la cola individual empieza la siguiente."""
+    return _terminar(_de_usuario(usuario_id), usuario_id, elemento_id, clave)

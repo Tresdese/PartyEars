@@ -10,7 +10,8 @@ import '../../music/data/catalogo_service.dart';
 class AgregarCancionScreen extends StatefulWidget {
     const AgregarCancionScreen({super.key, required this.buscar, required this.agregar});
 
-    final Future<List<CancionCatalogo>> Function(String texto) buscar;
+    /// Una página de la búsqueda (contrato 3.1); [pagina] cuenta desde 1.
+    final Future<PaginaCatalogo> Function(String texto, int pagina) buscar;
 
     /// Devuelve el mensaje que se muestra al usuario.
     final Future<String> Function(String recursoAudioId) agregar;
@@ -20,7 +21,10 @@ class AgregarCancionScreen extends StatefulWidget {
 }
 
 class _AgregarCancionScreenState extends State<AgregarCancionScreen> {
-    List<CancionCatalogo> _resultados = const [];
+    final _resultados = <CancionCatalogo>[];
+    String _texto = '';
+    int _pagina = 0;
+    bool _hayMas = false;
     String? _error;
     bool _buscando = false;
     String? _agregando;
@@ -39,15 +43,22 @@ class _AgregarCancionScreenState extends State<AgregarCancionScreen> {
         super.dispose();
     }
 
-    Future<void> _buscar(String texto) async {
+    Future<void> _buscar(String texto, {bool siguiente = false}) async {
         final busqueda = ++_busqueda;
-        setState(() => _buscando = true);
+        final pagina = siguiente ? _pagina + 1 : 1;
+        setState(() {
+            _buscando = true;
+            if (!siguiente) _texto = texto.trim();
+        });
         try {
-            final resultados = await widget.buscar(texto.trim());
+            final resultado = await widget.buscar(_texto, pagina);
             // An older search answering late must not replace a newer one.
             if (!mounted || busqueda != _busqueda) return;
             setState(() {
-                _resultados = resultados;
+                if (!siguiente) _resultados.clear();
+                _resultados.addAll(resultado.resultados);
+                _pagina = resultado.pagina;
+                _hayMas = resultado.hayMas;
                 _error = null;
             });
         } on ApiException catch (e) {
@@ -98,6 +109,16 @@ class _AgregarCancionScreenState extends State<AgregarCancionScreen> {
                                     )
                                     : const Text('No disponible', style: TextStyle(color: AppColors.muted)),
                             ),
+                    if (_hayMas)
+                        Padding(
+                            padding: const EdgeInsets.only(top: 16),
+                            child: Center(
+                                child: OutlinedButton(
+                                    onPressed: _buscando ? null : () => _buscar(_texto, siguiente: true),
+                                    child: Text(_buscando ? 'Cargando...' : 'Cargar más'),
+                                ),
+                            ),
+                        ),
                 ],
             ),
         );

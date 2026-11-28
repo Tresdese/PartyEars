@@ -3,13 +3,15 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:partyears_frontend/app/party_ears_app.dart';
-import 'package:partyears_frontend/core/demo_data.dart';
 import 'package:partyears_frontend/core/network/api_exception.dart';
 import 'package:partyears_frontend/core/network/red.dart';
+import 'package:partyears_frontend/features/music/data/catalogo_service.dart';
 import 'package:partyears_frontend/features/party/data/party_models.dart';
 import 'package:partyears_frontend/features/party/data/party_service.dart';
 import 'package:partyears_frontend/features/party/presentation/party_screen.dart';
 import 'package:partyears_frontend/features/party/sesion_party.dart';
+import 'package:partyears_frontend/features/queue/data/mi_cola_service.dart';
+import 'package:partyears_frontend/features/queue/mi_cola.dart';
 
 import 'party/falsos.dart';
 
@@ -69,6 +71,13 @@ void main() {
         await Red.iniciar();
         PartyService.fabrica = () => _PartyFalso();
         SesionParty.fabrica = sesionFalsa;
+        // A fake player instead of media_kit: tests have no native audio library.
+        ControladorMiCola.fabrica = () => ControladorMiCola(
+            servicio: MiColaService(Red.instancia.api),
+            detalle: CatalogoService(Red.instancia.api).detalle,
+            reproductor: ReproductorFalso(),
+            abrirAudio: (_, _) async {},
+        );
     });
 
     group('Pruebas de PartyEars', () {
@@ -141,7 +150,7 @@ void main() {
                 await _login(tester);
                 expect(find.text('Bienvenido a PartyEars'), findsOneWidget);
                 expect(find.text('Crea o únete a una Party'), findsOneWidget);
-                expect(find.text(demoPartyCode), findsNothing);
+                expect(find.text('K7Q2ZP'), findsNothing);
                 expect(find.text('Sala activa'.toUpperCase()), findsNothing);
             }
         );
@@ -300,23 +309,22 @@ void main() {
             }
         );
 
-        testWidgets('Sin party se puede agregar a la cola individual', 
-            (WidgetTester tester,) async {
+        testWidgets('Sin party se agrega una canción del catálogo a la cola individual',
+            (WidgetTester tester) async {
                 _useDesktopSize(tester);
                 await _login(tester);
                 await tester.tap(find.text('Música'));
                 await tester.pumpAndSettle();
-                await tester.tap(find.byIcon(Icons.add).first);
+                await tester.tap(find.byTooltip('Agregar a mi cola').first);
+                await tester.pump(const Duration(seconds: 1));
                 await tester.pump();
-                expect(
-                    find.textContaining('a la cola requiere el backend'),
-                    findsOneWidget,
-                );
+                expect(find.textContaining('se agregó a tu cola'), findsOneWidget);
+                expect(find.textContaining('Mi cola ('), findsOneWidget);
                 expect(find.textContaining('Únete a una party'), findsNothing);
             }
         );
 
-        testWidgets('Filtra el catálogo por género', 
+        testWidgets('El catálogo busca en el servidor por título o artista',
             (WidgetTester tester) async {
                 _useDesktopSize(tester);
                 await _login(tester);
@@ -325,11 +333,23 @@ void main() {
                 await tester.pumpAndSettle();
                 expect(find.text('6 resultados'), findsOneWidget);
 
-                await tester.tap(find.text('Pop'));
+                await tester.enterText(find.byType(TextField).first, 'cafetales');
+                await tester.pump(const Duration(seconds: 1));
                 await tester.pumpAndSettle();
-                expect(find.text('1 resultado'), findsOneWidget);
-                expect(find.text('Blinding Lights'), findsOneWidget);
-                expect(find.text('After Dark'), findsNothing);
+                expect(find.text('2 resultados'), findsOneWidget);
+                expect(find.text('Camino a Xalapa'), findsOneWidget);
+                expect(find.text('Marea Alta'), findsNothing);
+            }
+        );
+
+        testWidgets('Solo se ofrece la instrumental cuando existe',
+            (WidgetTester tester) async {
+                _useDesktopSize(tester);
+                await _login(tester);
+                await tester.tap(find.text('Música'));
+                await tester.pumpAndSettle();
+                // In the simulated catalog only songs 1 and 3 have an instrumental version.
+                expect(find.widgetWithText(FilterChip, 'Instrumental'), findsNWidgets(2));
             }
         );
     });

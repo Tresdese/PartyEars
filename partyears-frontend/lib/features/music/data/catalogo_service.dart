@@ -7,6 +7,8 @@ class VarianteAudio {
     final String recursoAudioId;
     final String tipo;
     final bool disponible;
+
+    bool get esInstrumental => tipo == 'instrumental';
 }
 
 class CancionCatalogo {
@@ -27,18 +29,82 @@ class CancionCatalogo {
     final List<String> artistas;
     final int duracionMs;
     final List<VarianteAudio> variantes;
+
+    String get nombreArtistas => artistas.join(', ');
+
+    /// RF-25: solo se ofrece la instrumental si el catálogo la tiene.
+    VarianteAudio? get original => _variante('original');
+    VarianteAudio? get instrumental => _variante('instrumental');
+
+    VarianteAudio? _variante(String tipo) {
+        for (final v in variantes) {
+            if (v.tipo == tipo && v.disponible) return v;
+        }
+        return null;
+    }
 }
 
-/// Búsqueda del catálogo (contrato 3.1).
+/// Una página de la búsqueda (contrato 1.5).
+class PaginaCatalogo {
+    const PaginaCatalogo({required this.resultados, required this.pagina, required this.totalPaginas, required this.total});
+
+    factory PaginaCatalogo.desdeJson(Map<String, dynamic> json) => PaginaCatalogo(
+        resultados: [
+            for (final c in (json['resultados'] as List<dynamic>? ?? const []))
+                CancionCatalogo.desdeJson(Map<String, dynamic>.from(c as Map)),
+        ],
+        pagina: (json['pagina'] as num? ?? 1).toInt(),
+        totalPaginas: (json['total_paginas'] as num? ?? 0).toInt(),
+        total: (json['total'] as num? ?? 0).toInt(),
+    );
+
+    final List<CancionCatalogo> resultados;
+    final int pagina;
+    final int totalPaginas;
+    final int total;
+
+    bool get hayMas => pagina < totalPaginas;
+}
+
+/// Lo que se muestra de un elemento de cola: la canción y la variante (contrato 3.2).
+class DetalleRecurso {
+    const DetalleRecurso({required this.recursoAudioId, required this.tipo, required this.titulo, required this.artistas,
+                          required this.duracionMs});
+
+    factory DetalleRecurso.desdeJson(Map<String, dynamic> json) {
+        final cancion = Map<String, dynamic>.from(json['cancion'] as Map);
+        return DetalleRecurso(
+            recursoAudioId: json['recurso_audio_id'] as String,
+            tipo: json['tipo'] as String,
+            titulo: cancion['titulo'] as String,
+            artistas: [for (final a in (cancion['artistas'] as List<dynamic>? ?? const [])) (a as Map)['nombre'] as String],
+            duracionMs: (cancion['duracion_ms'] as num? ?? 0).toInt(),
+        );
+    }
+
+    final String recursoAudioId;
+    final String tipo;
+    final String titulo;
+    final List<String> artistas;
+    final int duracionMs;
+
+    String get tituloConVariante => tipo == 'instrumental' ? '$titulo (instrumental)' : titulo;
+    String get nombreArtistas => artistas.join(', ');
+}
+
+/// Búsqueda del catálogo (contrato 3.1) y metadatos de recursos (3.2).
 class CatalogoService {
     CatalogoService(this._api);
 
     final ApiClient _api;
 
-    // TODO(T-52): only the first page; P-06 shows up to 20 results until search pages exist.
-    Future<List<CancionCatalogo>> buscar(String texto) async {
-        final respuesta = await _api.get(Servicio.music, '/canciones', query: {'q': texto, 'pagina': '1'});
-        final resultados = respuesta is Map ? respuesta['resultados'] : null;
-        return [for (final c in (resultados as List<dynamic>? ?? const [])) CancionCatalogo.desdeJson(Map<String, dynamic>.from(c as Map))];
+    Future<PaginaCatalogo> buscarPagina(String texto, {int pagina = 1}) async {
+        final respuesta = await _api.get(Servicio.music, '/canciones', query: {'q': texto, 'pagina': '$pagina'});
+        return PaginaCatalogo.desdeJson(respuesta is Map<String, dynamic> ? respuesta : const {});
+    }
+
+    Future<DetalleRecurso> detalle(String recursoAudioId) async {
+        final respuesta = await _api.get(Servicio.music, '/recursos/$recursoAudioId');
+        return DetalleRecurso.desdeJson(Map<String, dynamic>.from(respuesta as Map));
     }
 }

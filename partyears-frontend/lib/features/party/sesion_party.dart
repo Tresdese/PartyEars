@@ -46,7 +46,7 @@ class SesionParty extends ChangeNotifier {
             reproductor: reproductor,
             abrirAudio: (recurso, desde) => abrirRecurso(reproductor, recurso, desde: desde),
             leerUsuario: () async => usuarioDelToken((await red.api.tokensVigentes()).tokenAcceso),
-            buscarCanciones: CatalogoService(red.api).buscar,
+            buscarCanciones: (texto, pagina) => CatalogoService(red.api).buscarPagina(texto, pagina: pagina),
         );
     };
 
@@ -66,7 +66,7 @@ class SesionParty extends ChangeNotifier {
     final Future<String?> Function()? leerUsuario;
 
     /// Búsqueda del catálogo para P-06 (contrato 3.1).
-    final Future<List<CancionCatalogo>> Function(String texto)? buscarCanciones;
+    final Future<PaginaCatalogo> Function(String texto, int pagina)? buscarCanciones;
     Completer<void> _relojListo = Completer<void>();
 
     PartyActual _party;

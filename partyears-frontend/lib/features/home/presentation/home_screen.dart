@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/demo_data.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/common.dart';
+import '../../party/data/party_models.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({
@@ -10,16 +10,20 @@ class HomeScreen extends StatelessWidget {
     required this.partyCode,
     required this.onOpenParty,
     required this.onExploreMusic,
+    this.party,
   });
 
   final String? partyCode;
+  final PartyActual? party;
   final VoidCallback onOpenParty;
   final VoidCallback onExploreMusic;
 
   @override
   Widget build(BuildContext context) {
     final compact = isCompact(context);
-    final inParty = partyCode != null;
+    final party = this.party;
+    // party instead of the code alone: members get no code from the server (contract 4).
+    final inParty = party != null || partyCode != null;
     final gap = compact ? 20.0 : 40.0;
     return ListView(
       padding: EdgeInsets.fromLTRB(gap, gap, gap, 32),
@@ -35,16 +39,21 @@ class HomeScreen extends StatelessWidget {
           onOpenParty: onOpenParty,
           onExploreMusic: onExploreMusic,
         ),
-        if (inParty) ...[
+        if (party != null) ...[
           const SizedBox(height: 40),
           const Text('Un vistazo rápido', style: _sectionStyle),
           const SizedBox(height: 16),
-          _Stats(compact: compact),
+          _Stats(compact: compact, party: party),
+        ],
+        if (inParty) ...[
           const SizedBox(height: 40),
           Row(
             children: [
-              const Expanded(
-                child: Text('Continúa escuchando', style: _sectionStyle),
+              Expanded(
+                child: Text(
+                  party == null ? 'Tu party' : 'Tu party: ${party.nombre}',
+                  style: _sectionStyle,
+                ),
               ),
               TextButton(
                 onPressed: onOpenParty,
@@ -59,8 +68,6 @@ class HomeScreen extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          _NowPlayingCard(song: demoSongs.first),
         ],
       ],
     );
@@ -200,27 +207,23 @@ class _HeroBanner extends StatelessWidget {
 }
 
 class _Stats extends StatelessWidget {
-  const _Stats({required this.compact});
+  const _Stats({required this.compact, required this.party});
 
   final bool compact;
+  final PartyActual party;
 
   @override
   Widget build(BuildContext context) {
-    const cards = [
+    final cards = [
       _StatCard(
         icon: Icons.group_outlined,
-        value: demoParticipants,
-        label: 'Participantes en tu sala',
+        value: party.miembros.where((m) => m.conectado).length,
+        label: 'Participantes conectados',
       ),
       _StatCard(
-        icon: Icons.queue_music,
-        value: demoQueueCount,
-        label: 'Canciones en cola',
-      ),
-      _StatCard(
-        icon: Icons.mic_none,
-        value: demoVoiceMembers,
-        label: 'Miembros conectados a voz',
+        icon: Icons.person_outline,
+        value: party.miembros.length,
+        label: 'Miembros de la party',
       ),
     ];
     if (compact) {
@@ -273,44 +276,6 @@ class _StatCard extends StatelessWidget {
             label,
             style: const TextStyle(color: AppColors.muted, fontSize: 12),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _NowPlayingCard extends StatelessWidget {
-  const _NowPlayingCard({required this.song});
-
-  final Song song;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: _cardDecoration,
-      child: Row(
-        children: [
-          AlbumCover(color: song.color, size: 56),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const StatusBadge(label: 'En curso'),
-                const SizedBox(height: 8),
-                Text(
-                  song.title,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-                Text(
-                  song.artist,
-                  style: const TextStyle(color: AppColors.muted, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-          Text(song.duration, style: const TextStyle(color: AppColors.muted)),
         ],
       ),
     );

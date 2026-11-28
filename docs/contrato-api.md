@@ -421,6 +421,11 @@ La crea el servidor la primera vez que se consulta. Se conserva al cerrar sesió
 
 Diferencias con la compartida: solo la usa su dueño, no hay permisos, no hay WebSocket (la respuesta de cada operación trae el estado nuevo) y la reproducción la controla el propio usuario.
 
+- La cola se identifica por el `sub` del token: no hay forma de pedir la cola de otro usuario. Un `elemento_id` de otra cola responde `404 NO_ENCONTRADO`.
+- `referencia_en` es el instante de la operación, sin el adelanto de 1.5 s de la party: no hay otros clientes que esperar.
+- Las operaciones requieren `Idempotency-Key` igual que en 5.2, pero no generan registros en `logs` (RF-34 rastrea operaciones de parties).
+- `iniciar` con la cola sin pendientes: `409 COLA_VACIA`. Errores de reordenar y retirar: los mismos de 5.2 salvo `403`.
+
 ### 5.2 Cola compartida (Darlington)
 
 Solo miembros. Agregar requiere ser anfitrión o tener `puede_aportar`; reordenar, retirar y saltar requieren ser anfitrión o tener `puede_modificar_cola` (RF-11 a RF-13, RF-15). Todas las operaciones de cambio requieren `Idempotency-Key` y responden con el estado de la cola; los demás miembros reciben `cola.actualizada`.

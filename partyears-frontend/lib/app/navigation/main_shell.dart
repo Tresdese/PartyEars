@@ -2,18 +2,21 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../../core/demo_data.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/network/red.dart';
+import '../../core/network/sesion_usuario.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/common.dart';
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/home/presentation/home_screen.dart';
+import '../../features/music/data/catalogo_service.dart';
 import '../../features/music/presentation/music_screen.dart';
 import '../../features/party/data/party_models.dart';
 import '../../features/party/data/party_service.dart';
 import '../../features/party/presentation/party_screen.dart';
 import '../../features/profile/presentation/profile_screen.dart';
+import '../../features/queue/mi_cola.dart';
+import '../../features/queue/presentation/queue_screen.dart';
 
 class MainShell extends StatefulWidget {
     const MainShell({super.key});
@@ -32,8 +35,11 @@ class _MainShellState extends State<MainShell> {
     String? get _partyCode => _party?.codigo;
 
     late final PartyService _partyService = PartyService.fabrica();
+    late final ControladorMiCola _miCola = ControladorMiCola.fabrica();
+    late final CatalogoService _catalogo = CatalogoService(Red.instancia.api);
 
     StreamSubscription<void>? _expirada;
+    UsuarioSesion? _usuario;
 
     @override
     void initState() {
@@ -43,12 +49,30 @@ class _MainShellState extends State<MainShell> {
             if (mounted) unawaited(_logout());
         });
         _restaurarParty();
+        unawaited(_miCola.cargar());
+        unawaited(_cargarUsuario());
     }
 
     @override
     void dispose() {
         _expirada?.cancel();
+        _miCola.dispose();
         super.dispose();
+    }
+
+    Future<void> _cargarUsuario() async {
+        final usuario = await UsuarioSesion.actual();
+        if (mounted) setState(() => _usuario = usuario);
+    }
+
+    void _entrarAParty(PartyActual party) {
+        // PRE-03 of CU-25: the individual queue never plays over the party.
+        unawaited(_miCola.pausarPorParty());
+        setState(() => _party = party);
+    }
+
+    void _abrirMiCola() {
+        Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => QueueScreen(controlador: _miCola)));
     }
 
     Future<void> _restaurarParty() async {
@@ -68,7 +92,7 @@ class _MainShellState extends State<MainShell> {
 
             if (!mounted || party == null) return;
 
-            setState(() => _party = party);
+            _entrarAParty(party);
         } on ApiException {
         // Sin sesión o sin conexión: se queda en "sin party".
         }
@@ -79,7 +103,7 @@ class _MainShellState extends State<MainShell> {
 
         if (!mounted) return;
 
-        setState(() => _party = party);
+        _entrarAParty(party);
     }
 
     Future<void> _unirseParty(String codigo, {String? clave}) async {
@@ -87,7 +111,7 @@ class _MainShellState extends State<MainShell> {
 
         if (!mounted) return;
 
-        setState(() => _party = party);
+        _entrarAParty(party);
     }
 
     // CU-15 step 6 and CU-16 step 8: back to the main screen, with the message if there is one.
@@ -112,6 +136,8 @@ class _MainShellState extends State<MainShell> {
     // CU-03: revoking on the server instead of only changing screens, or the refresh token
     // would stay valid for 7 days on this device.
     Future<void> _logout() async {
+        // CU-03 stops the audio before closing the session; the queue itself stays on the server.
+        await _miCola.pausarPorParty();
         await PartyService.olvidar();
         await Red.instancia.api.cerrarSesion();
         if (!mounted) return;
@@ -131,6 +157,7 @@ class _MainShellState extends State<MainShell> {
                     title: _items[_selectedIndex].label,
                     partyCode: _partyCode,
                     onLogout: _logout,
+                    usuario: _usuario,
                 ),
                 Expanded(
                     child: IndexedStack(
@@ -138,10 +165,16 @@ class _MainShellState extends State<MainShell> {
                         children: [
                             HomeScreen(
                                 partyCode: _partyCode,
+                                party: _party,
                                 onOpenParty: () => _go(2),
                                 onExploreMusic: () => _go(1),
                             ),
-                            MusicScreen(inParty: _party != null),
+                            MusicScreen(
+                                inParty: _party != null,
+                                controlador: _miCola,
+                                buscarPagina: (texto, pagina) => _catalogo.buscarPagina(texto, pagina: pagina),
+                                onAbrirParty: () => _go(2),
+                            ),
                             PartyScreen(
                                 partyCode: _partyCode,
                                 party: _party,
@@ -149,11 +182,12 @@ class _MainShellState extends State<MainShell> {
                                 onJoin: _unirseParty,
                                 onLeave: _salirDeParty,
                             ),
-                            const ProfileScreen(),
+                            ProfileScreen(usuario: _usuario),
                         ],
                     ),
                 ),
-                const _MiniPlayer(),
+                // The party screen has its own player; this one is the individual queue's.
+                if (_party == null) _MiniPlayer(controlador: _miCola, onAbrir: _abrirMiCola),
             ],
         );
 
@@ -179,6 +213,7 @@ class _MainShellState extends State<MainShell> {
                         selectedIndex: _selectedIndex,
                         onSelect: _go,
                         onLogout: _logout,
+                        usuario: _usuario,
                     ),
                     Expanded(child: content),
                 ],
@@ -193,7 +228,10 @@ class _Sidebar extends StatelessWidget {
         required this.selectedIndex,
         required this.onSelect,
         required this.onLogout,
+        this.usuario,
     });
+
+    final UsuarioSesion? usuario;
 
     final List<({String? section, String label, IconData icon})> items;
     final int selectedIndex;
@@ -239,7 +277,7 @@ class _Sidebar extends StatelessWidget {
                     ),
                 ],
                 const Spacer(),
-                _UserCard(onLogout: onLogout),
+                _UserCard(onLogout: onLogout, usuario: usuario),
                 ],
             ),
         );
@@ -292,9 +330,10 @@ class _NavTile extends StatelessWidget {
 }
 
 class _UserCard extends StatelessWidget {
-    const _UserCard({required this.onLogout});
+    const _UserCard({required this.onLogout, this.usuario});
 
     final VoidCallback onLogout;
+    final UsuarioSesion? usuario;
 
     @override
     Widget build(BuildContext context) {
@@ -307,19 +346,21 @@ class _UserCard extends StatelessWidget {
             ),
             child: Row(
                 children: [
-                    const _Avatar(),
+                    _Avatar(usuario: usuario),
                     const SizedBox(width: 10),
-                    const Expanded(
+                    Expanded(
                         child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisSize: MainAxisSize.min,
                             children: [
                                 Text(
-                                    demoUserName,
-                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                                    usuario?.nombreUsuario ?? '',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                                 ),
-                                SizedBox(height: 2),
-                                Row(
+                                const SizedBox(height: 2),
+                                const Row(
                                     children: [
                                         StatusDot(),
                                         SizedBox(width: 6),
@@ -346,16 +387,18 @@ class _UserCard extends StatelessWidget {
 }
 
 class _Avatar extends StatelessWidget {
-    const _Avatar();
+    const _Avatar({this.usuario});
+
+    final UsuarioSesion? usuario;
 
     @override
     Widget build(BuildContext context) {
-        return const CircleAvatar(
+        return CircleAvatar(
             radius: 16,
             backgroundColor: AppColors.primary,
             child: Text(
-                demoUserInitials,
-                style: TextStyle(
+                usuario?.iniciales ?? '',
+                style: const TextStyle(
                     color: Colors.white,
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
@@ -370,8 +413,10 @@ class _TopBar extends StatelessWidget {
         required this.title,
         required this.partyCode,
         required this.onLogout,
+        this.usuario,
     });
 
+    final UsuarioSesion? usuario;
     final String title;
     final String? partyCode;
     final VoidCallback onLogout;
@@ -445,7 +490,7 @@ class _TopBar extends StatelessWidget {
                             icon: const Icon(Icons.notifications_none, size: 20),
                         ),
                         const SizedBox(width: 12),
-                        const _Avatar(),
+                        _Avatar(usuario: usuario),
                     ],
                 ],
             ),
@@ -480,90 +525,95 @@ class _Pill extends StatelessWidget {
     }
 }
 
+/// Barra inferior con la canción de la cola individual; al tocarla se abre la cola.
 class _MiniPlayer extends StatelessWidget {
-    const _MiniPlayer();
+    const _MiniPlayer({required this.controlador, required this.onAbrir});
+
+    final ControladorMiCola controlador;
+    final VoidCallback onAbrir;
 
     @override
     Widget build(BuildContext context) {
-        final song = demoSongs.first;
-        final compact = isCompact(context);
-        return Container(
-            height: 68,
-            padding: EdgeInsets.symmetric(horizontal: compact ? 16 : 24),
-            decoration: const BoxDecoration(
-                color: AppColors.sidebar,
-                border: Border(top: BorderSide(color: AppColors.border)),
-            ),
-            child: Row(
-                children: [
-                    Expanded(
-                        child: Row(
-                            children: [
-                                AlbumCover(color: song.color),
-                                const SizedBox(width: 14),
-                                Flexible(
-                                    child: Column(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                            Text(
-                                                song.title,
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(
-                                                    fontSize: 13,
-                                                    fontWeight: FontWeight.w600,
+        return ListenableBuilder(
+            listenable: controlador,
+            builder: (context, _) {
+                final c = controlador;
+                final recurso = c.reproduccion.recursoAudioId;
+                final detalle = recurso == null ? null : c.detalleDe(recurso);
+                final compact = isCompact(context);
+                final totalMs = c.duracion.inMilliseconds;
+                final progreso = totalMs > 0 ? (c.posicion.inMilliseconds / totalMs).clamp(0.0, 1.0) : 0.0;
+
+                return Material(
+                    color: AppColors.sidebar,
+                    child: InkWell(
+                        onTap: onAbrir,
+                        child: Container(
+                            height: 68,
+                            padding: EdgeInsets.symmetric(horizontal: compact ? 16 : 24),
+                            decoration: const BoxDecoration(border: Border(top: BorderSide(color: AppColors.border))),
+                            child: Row(
+                                children: [
+                                    Expanded(
+                                        child: Row(
+                                            children: [
+                                                AlbumCover(color: colorDePortada(detalle?.titulo ?? '')),
+                                                const SizedBox(width: 14),
+                                                Flexible(
+                                                    child: Column(
+                                                        mainAxisAlignment: MainAxisAlignment.center,
+                                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                                        children: [
+                                                            Text(
+                                                                c.hayActual ? (detalle?.tituloConVariante ?? 'Canción') : 'Tu cola',
+                                                                maxLines: 1,
+                                                                overflow: TextOverflow.ellipsis,
+                                                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                                                            ),
+                                                            Text(
+                                                                c.hayActual
+                                                                    ? (detalle?.nombreArtistas ?? '')
+                                                                    : '${c.pendientes.length} pendientes',
+                                                                maxLines: 1,
+                                                                overflow: TextOverflow.ellipsis,
+                                                                style: const TextStyle(color: AppColors.muted, fontSize: 11),
+                                                            ),
+                                                        ],
+                                                    ),
                                                 ),
-                                            ),
-                                            Text(
-                                                song.artist,
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(
-                                                    color: AppColors.muted,
-                                                    fontSize: 11,
-                                                ),
-                                            ),
-                                        ],
+                                            ],
+                                        ),
                                     ),
-                                ),
-                            ],
+                                    IconButton.filled(
+                                        tooltip: c.sonando ? 'Pausar' : 'Reproducir',
+                                        onPressed: c.ocupado || (!c.hayActual && c.pendientes.isEmpty) ? null : c.alternar,
+                                        icon: Icon(c.sonando ? Icons.pause : Icons.play_arrow, size: 18),
+                                    ),
+                                    IconButton(
+                                        tooltip: 'Saltar',
+                                        onPressed: c.ocupado || !c.hayActual ? null : c.saltar,
+                                        icon: const Icon(Icons.skip_next_outlined),
+                                    ),
+                                    if (!compact) ...[
+                                        const SizedBox(width: 24),
+                                        SizedBox(
+                                            width: 300,
+                                            child: LinearProgressIndicator(
+                                                value: progreso,
+                                                minHeight: 4,
+                                                color: AppColors.primaryLight,
+                                                backgroundColor: AppColors.border,
+                                                borderRadius: BorderRadius.circular(2),
+                                            ),
+                                        ),
+                                        const Spacer(),
+                                    ],
+                                ],
+                            ),
                         ),
                     ),
-                    const Icon(Icons.skip_previous_outlined),
-                    const SizedBox(width: 16),
-                    Container(
-                        width: 34,
-                        height: 34,
-                        decoration: const BoxDecoration(
-                        color: AppColors.primary,
-                        shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.pause, size: 18),
-                    ),
-                    const SizedBox(width: 16),
-                    const Icon(Icons.skip_next_outlined),
-                    if (!compact) ...[
-                        const SizedBox(width: 40),
-                        SizedBox(
-                        width: 300,
-                        child: LinearProgressIndicator(
-                            value: 0.42,
-                            minHeight: 4,
-                            color: AppColors.primaryLight,
-                            backgroundColor: AppColors.border,
-                            borderRadius: BorderRadius.circular(2),
-                        ),
-                        ),
-                    ],
-                    const Expanded(
-                        child: Align(
-                        alignment: Alignment.centerRight,
-                        child: Icon(Icons.volume_up_outlined, color: AppColors.muted),
-                        ),
-                    ),
-                ],
-            ),
+                );
+            },
         );
     }
 }

@@ -208,3 +208,28 @@ class StatusDot extends StatelessWidget {
     );
   }
 }
+
+/// 3:05, como se muestran las duraciones en el catálogo y en la cola.
+String formatearDuracion(Duration duracion) {
+  final segundos = duracion.inSeconds < 0 ? 0 : duracion.inSeconds;
+  return '${segundos ~/ 60}:${(segundos % 60).toString().padLeft(2, '0')}';
+}
+
+const _coloresPortada = [
+  Color(0xFF8B5CF6),
+  Color(0xFFE0608A),
+  Color(0xFF3B82C4),
+  Color(0xFF6B9A9E),
+  Color(0xFFC0606A),
+  Color(0xFFD08A3A),
+];
+
+/// The catalog has no cover art, so each song gets a color from its title instead; the same
+/// song keeps the same color on every screen.
+Color colorDePortada(String texto) {
+  var suma = 0;
+  for (final unidad in texto.codeUnits) {
+    suma = (suma * 31 + unidad) & 0x7fffffff;
+  }
+  return _coloresPortada[suma % _coloresPortada.length];
+}
